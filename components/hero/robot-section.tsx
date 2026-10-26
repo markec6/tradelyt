@@ -144,7 +144,7 @@ export function RobotSection() {
   }
 
   return (
-    <section className="relative py-24 px-6">
+    <section className="relative my-6 px-6 py-12 md:my-10 md:py-16 lg:my-16 lg:py-28">
       {/* Subtle continuing grid mesh */}
       <div
         className="absolute inset-0 opacity-20 pointer-events-none"

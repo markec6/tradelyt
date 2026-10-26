@@ -1,3 +1,5 @@
+import Link from "next/link"
+
 export function HeaderSection() {
   return (
     <div className="text-center pt-24 sm:pt-28 md:pt-32 pb-10 sm:pb-12 md:pb-16 px-4 sm:px-6">
@@ -27,9 +29,12 @@ export function HeaderSection() {
 
       {/* CTA Buttons */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-        <button className="w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-3.5 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm sm:text-base font-semibold hover:scale-105 transition-transform shadow-xl shadow-emerald-500/30">
+        <Link
+          href="/onboarding"
+          className="inline-flex w-full sm:w-auto items-center justify-center px-6 sm:px-8 py-3 sm:py-3.5 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm sm:text-base font-semibold hover:scale-105 transition-transform shadow-xl shadow-emerald-500/30"
+        >
           Start Trading Smarter
-        </button>
+        </Link>
         <button className="w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-3.5 rounded-full border border-slate-700 text-slate-300 text-sm sm:text-base font-semibold hover:bg-slate-800 hover:border-slate-600 transition-all">
           View Live Demo
         </button>

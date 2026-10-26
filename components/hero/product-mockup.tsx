@@ -1,10 +1,12 @@
 import { AnalyticsDashboard } from "./analytics-dashboard"
 import { PhoneMockup } from "./phone-mockup"
-import { OvertradingCard, Tp1Card, SidewaysCard } from "./floating-cards"
+import { OvertradingCard, Tp1Card } from "./floating-cards"
+import { OrbitCard } from "./orbit-card"
+import { StageInView } from "./stage-in-view"
 
 export function ProductMockup() {
   return (
-    <div className="relative max-w-6xl w-full mx-auto px-4 sm:px-6 pb-16 sm:pb-24 lg:pb-32">
+    <div className="relative max-w-6xl w-full mx-auto px-4 sm:px-6 pb-10 md:pb-14">
       {/* Top: Full-width Trading Command Center */}
       <div className="relative w-full rounded-2xl sm:rounded-3xl border border-white/10 bg-slate-900/50 backdrop-blur-xl p-4 sm:p-6 shadow-2xl shadow-black/20">
         <div className="absolute inset-0 rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-800/50 via-transparent to-emerald-900/20 pointer-events-none" />
@@ -14,7 +16,7 @@ export function ProductMockup() {
       </div>
 
       {/* Bottom: Centered phone + floating cards */}
-      <div className="relative mx-auto w-full mt-12 sm:mt-16 lg:mt-20">
+      <div className="relative mx-auto w-full mt-24 md:mt-32">
         {/* Atmosphere: clipped so 500px orbs cannot cause overflow; cards stay unclipped */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
           <div className="bg-gradient-to-r from-emerald-500/15 via-cyan-500/10 to-transparent blur-3xl rounded-full w-[500px] h-[500px] max-w-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
@@ -48,32 +50,39 @@ export function ProductMockup() {
         </div>
 
         {/* Mobile / tablet: cards above and below the phone */}
-        <div className="flex w-full flex-col items-center gap-4 lg:hidden">
-          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-            <OvertradingCard variant="compact" />
-            <Tp1Card variant="compact" />
+        <StageInView className="flex w-full flex-col items-center gap-4 overflow-visible lg:hidden">
+          <div className="grid w-full grid-cols-1 gap-3 overflow-visible sm:grid-cols-2">
+            <OrbitCard className="rotate-0" y={[-4, 4, -4]} duration={4}>
+              <OvertradingCard variant="compact" />
+            </OrbitCard>
+            <OrbitCard className="rotate-0" y={[4, -4, 4]} duration={4.5} delay={1.2}>
+              <Tp1Card variant="compact" />
+            </OrbitCard>
           </div>
           <PhoneMockup />
-          <div className="w-full sm:max-w-md">
-            <SidewaysCard variant="compact" />
-          </div>
-        </div>
+        </StageInView>
 
-        {/* Desktop: cards sit on the stage corners around the phone */}
-        <div className="hidden lg:block relative min-h-[620px]">
-          <div className="relative z-10 flex min-h-[620px] items-center justify-center">
+        {/* Desktop: two level cards beside the phone, inside its height */}
+        <StageInView className="relative hidden overflow-visible py-6 perspective-[1000px] lg:block">
+          <div className="relative z-10 flex items-center justify-center">
             <PhoneMockup />
           </div>
-          <div className="absolute left-0 top-4 z-20">
+          <OrbitCard
+            className="absolute left-1/2 top-10 z-20 -translate-x-[calc(100%+155px)] rotate-0"
+            y={[-4, 4, -4]}
+            duration={4}
+          >
             <OvertradingCard variant="float" />
-          </div>
-          <div className="absolute right-0 top-4 z-20">
+          </OrbitCard>
+          <OrbitCard
+            className="absolute bottom-10 left-1/2 z-20 translate-x-[155px] rotate-0"
+            y={[4, -4, 4]}
+            duration={4.5}
+            delay={1.2}
+          >
             <Tp1Card variant="float" />
-          </div>
-          <div className="absolute right-0 bottom-4 z-20">
-            <SidewaysCard variant="float" />
-          </div>
-        </div>
+          </OrbitCard>
+        </StageInView>
       </div>
 
       {/* Background Glow Effects */}

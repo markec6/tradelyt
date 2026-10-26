@@ -248,6 +248,34 @@
   animation: pulse-glow 2.8s ease-in-out infinite;
 }
 
+@keyframes live-lock-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 2px rgba(16, 185, 129, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.7);
+  }
+}
+
+@keyframes live-terminate-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 2px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.7);
+  }
+}
+
+.animate-live-lock-glow {
+  animation: live-lock-glow 1.2s ease-in-out infinite;
+}
+
+.animate-live-terminate-glow {
+  animation: live-terminate-glow 1.2s ease-in-out infinite;
+}
+
 /* Counter-rotating power ring */
 @keyframes spin-border-reverse {
   to {

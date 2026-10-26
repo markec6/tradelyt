@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 
 const NAV_LINKS = [
@@ -69,9 +70,12 @@ export function Navigation() {
 
           {/* Right Side */}
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            <button className="hidden sm:inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-2.5 py-1.5 sm:px-5 sm:py-2 rounded-xl text-[11px] sm:text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors whitespace-nowrap">
+            <Link
+              href="/onboarding"
+              className="hidden sm:inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-2.5 py-1.5 sm:px-5 sm:py-2 rounded-xl text-[11px] sm:text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors whitespace-nowrap"
+            >
               Launch App
-            </button>
+            </Link>
 
             <button
               type="button"
@@ -103,13 +107,13 @@ export function Navigation() {
                 {link.label}
               </a>
             ))}
-            <button
-              type="button"
+            <Link
+              href="/onboarding"
               onClick={() => setIsMenuOpen(false)}
-              className="sm:hidden mt-2 mb-1 w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-5 py-2 rounded-xl text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors"
+              className="sm:hidden mt-2 mb-1 inline-flex w-full items-center justify-center bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-5 py-2 rounded-xl text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors"
             >
               Launch App
-            </button>
+            </Link>
           </div>
         )}
       </div>

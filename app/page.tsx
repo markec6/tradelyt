@@ -3,6 +3,7 @@ import { HeaderSection } from "@/components/hero/header-section"
 import { ProductMockup } from "@/components/hero/product-mockup"
 import { RobotSection } from "@/components/hero/robot-section"
 import { LiveShowcaseSection } from "@/components/live-showcase/live-showcase-section"
+import { PartnerProgramSection } from "@/components/partner-program/partner-program-section"
 
 export default function Home() {
   return (
@@ -35,6 +36,7 @@ export default function Home() {
       </div>
 
       <LiveShowcaseSection />
+      <PartnerProgramSection />
     </main>
   )
 }

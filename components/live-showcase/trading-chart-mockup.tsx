@@ -29,36 +29,70 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function CandleSeries({ candles }: { candles: Candle[] }) {
+type LiveCandle = {
+  index: number
+  close: number
+  high: number
+  low: number
+  rising: boolean
+  bodyPx: number
+}
+
+function CandleSeries({ candles, live }: { candles: Candle[]; live: LiveCandle | null }) {
   const yScale = useYAxisScale()
   const xScale = useXAxisScale()
   if (!yScale || !xScale || candles.length === 0) return null
 
   const bodyWidth = Math.max(5, Math.min(11, 240 / candles.length))
+  const glow = live?.rising ? "#34d399" : "#fb7185"
 
   return (
     <g>
+      <defs>
+        <filter id="live-candle-glow" x="-80%" y="-80%" width="260%" height="260%">
+          <feDropShadow dx="0" dy="0" stdDeviation="2.4" floodColor={glow} floodOpacity="0.95" />
+        </filter>
+      </defs>
       {candles.map((candle) => {
         const x = xScale(candle.index, { position: "middle" })
-        const yHigh = yScale(candle.high)
-        const yLow = yScale(candle.low)
+        const isLive = live != null && candle.index === live.index
+        const close = isLive ? live.close : candle.close
+        const high = isLive ? live.high : candle.high
+        const low = isLive ? live.low : candle.low
+        const yHigh = yScale(high)
+        const yLow = yScale(low)
         const yOpen = yScale(candle.open)
-        const yClose = yScale(candle.close)
+        const yClose = yScale(close)
         if (x == null || yHigh == null || yLow == null || yOpen == null || yClose == null) return null
 
-        const rising = candle.close >= candle.open
-        const top = Math.min(yOpen, yClose)
-        const height = Math.max(Math.abs(yClose - yOpen), 2)
+        const rising = isLive ? live.rising : close >= candle.open
+        const extra = isLive ? live.bodyPx : 0
+        let top = Math.min(yOpen, yClose)
+        let height = Math.max(Math.abs(yClose - yOpen), 2)
+        let wickTop = yHigh
+        let wickBottom = yLow
+        if (extra > 0) {
+          if (rising) {
+            top -= extra
+            height += extra
+            wickTop -= extra
+          } else {
+            height += extra
+            wickBottom += extra
+          }
+        }
+        const color = rising ? "#34d399" : "#fb7185"
         return (
           <g key={candle.index}>
-            <line x1={x} x2={x} y1={yHigh} y2={yLow} stroke="#cbd5e1" strokeWidth={1.25} />
+            <line x1={x} x2={x} y1={wickTop} y2={wickBottom} stroke="#cbd5e1" strokeWidth={1.25} />
             <rect
               x={x - bodyWidth / 2}
               y={top}
               width={bodyWidth}
               height={height}
               rx={0.5}
-              fill={rising ? "#34d399" : "#fb7185"}
+              fill={color}
+              filter={isLive ? "url(#live-candle-glow)" : undefined}
             />
           </g>
         )
@@ -67,12 +101,16 @@ function CandleSeries({ candles }: { candles: Candle[] }) {
   )
 }
 
+function priceStep(symbolId: SymbolId) {
+  if (symbolId === "BTCUSDT") return 8 + Math.random() * 7
+  return 0.02 + Math.random() * 0.02
+}
+
 export function TradingChartMockup({
   symbol,
   scenarioIndex,
   timeframeId,
   view,
-  paused,
   reducedMotion,
   onSymbol,
   onTimeframe,
@@ -82,7 +120,6 @@ export function TradingChartMockup({
   scenarioIndex: number
   timeframeId: TimeframeId
   view: ChartView
-  paused: boolean
   reducedMotion: boolean
   onSymbol: (id: SymbolId) => void
   onTimeframe: (id: TimeframeId) => void
@@ -130,7 +167,7 @@ export function TradingChartMockup({
   }, [focusStart, reducedMotion])
 
   useEffect(() => {
-    if (paused || reducedMotion) return
+    if (reducedMotion) return
     const id = window.setInterval(() => {
       if (animatingRef.current) return
       setWindowStart((current) => {
@@ -140,11 +177,56 @@ export function TradingChartMockup({
       })
     }, timeframe.stepMs)
     return () => window.clearInterval(id)
-  }, [paused, reducedMotion, timeframe.stepMs, maxStart])
+  }, [reducedMotion, timeframe.stepMs, maxStart])
 
   const start = clamp(Math.round(windowStart), 0, maxStart)
   const visible = symbol.candles.slice(start, start + timeframe.window)
-  const liveClose = visible[visible.length - 1]?.close ?? symbol.entry
+  const anchor = visible[visible.length - 1]
+  const anchorClose = anchor?.close ?? symbol.entry
+  const [liveTick, setLiveTick] = useState<LiveCandle | null>(null)
+  const anchorRef = useRef(anchor)
+  anchorRef.current = anchor
+
+  useEffect(() => {
+    const tick = () => {
+      const currentAnchor = anchorRef.current
+      if (!currentAnchor) return
+      const band = Math.abs(currentAnchor.close) * 0.0015
+      const floor = currentAnchor.close - band
+      const ceiling = currentAnchor.close + band
+      setLiveTick((previous) => {
+        const sameCandle = previous != null && previous.index === currentAnchor.index
+        const base = sameCandle ? previous.close : currentAnchor.close
+        let step = priceStep(symbol.id) * (Math.random() < 0.5 ? -1 : 1)
+        let next = clamp(base + step, floor, ceiling)
+        if (next === base) {
+          step = -step
+          next = clamp(base + step, floor, ceiling)
+        }
+        const delta = next - currentAnchor.close
+        return {
+          index: currentAnchor.index,
+          close: next,
+          high: currentAnchor.high + Math.max(0, delta),
+          low: currentAnchor.low + Math.min(0, delta),
+          rising: next >= base,
+          bodyPx: 3 + Math.random() * 5,
+        }
+      })
+    }
+    tick()
+    const tickId = window.setInterval(tick, 400)
+    return () => window.clearInterval(tickId)
+  }, [symbol.id])
+
+  const live =
+    liveTick && anchor && liveTick.index === anchor.index ? liveTick : null
+  const liveClose = live?.close ?? anchorClose
+  const plotted = visible.map((candle) =>
+    live && candle.index === live.index
+      ? { ...candle, close: live.close, high: live.high, low: live.low }
+      : candle,
+  )
 
   const stopTarget = scenarioIndex === 0 ? symbol.stop : symbol.entry
   const [stopY, setStopY] = useState(symbol.stop)
@@ -189,7 +271,7 @@ export function TradingChartMockup({
     }
     const previous = previousClose.current
     previousClose.current = liveClose
-    if (previous == null || previous === liveClose || reducedMotion) return
+    if (previous == null || previous === liveClose) return
     setFlash({ dir: liveClose > previous ? "up" : "down", token: Date.now() })
     const timeout = window.setTimeout(() => setFlash(null), 450)
     return () => window.clearTimeout(timeout)
@@ -202,7 +284,7 @@ export function TradingChartMockup({
   const breakEven = Math.abs(stopY - symbol.entry) / symbol.entry < 0.001
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col rounded-2xl border border-slate-800 bg-slate-950/50 p-3 lg:h-full">
+    <div className="flex h-auto min-w-0 flex-col rounded-2xl border border-slate-800 bg-slate-950/50 px-3 pt-3 pb-4">
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs text-slate-400">
         <div className="flex rounded-lg border border-slate-700 bg-slate-950 p-0.5" role="group" aria-label="Symbol">
           {SYMBOL_LIST.map((item) => (
@@ -265,11 +347,11 @@ export function TradingChartMockup({
         </div>
       </div>
 
-      <div className="relative mt-2 h-[280px] min-h-0 lg:h-[min(320px,100%)] lg:max-h-[320px] lg:min-h-[240px] lg:flex-1">
+      <div className="relative mt-2 h-[280px] lg:h-[320px]">
         <div className="h-full">
           {view === "candles" ? (
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-              <ComposedChart data={visible} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <ComposedChart data={plotted} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="#1e293b" vertical={false} />
                 <XAxis dataKey="index" type="category" hide />
                 <YAxis
@@ -281,7 +363,7 @@ export function TradingChartMockup({
                   tickLine={false}
                   allowDataOverflow
                 />
-                <CandleSeries candles={visible} />
+                <CandleSeries candles={plotted} live={live} />
                 <ReferenceLine
                   y={symbol.entry}
                   stroke="#60a5fa"

@@ -2,9 +2,9 @@ import { ShieldAlert, CheckCircle2, Timer } from "lucide-react"
 
 type CardVariant = "compact" | "float"
 
-function cardShell(variant: CardVariant, extra: string, floatAnim?: string) {
-  const compact = "w-full rounded-xl sm:rounded-2xl p-3 sm:p-4"
-  const floating = `w-72 rounded-2xl p-4 z-20 ${floatAnim ?? ""}`
+function cardShell(variant: CardVariant, extra: string) {
+  const compact = "w-full rounded-xl sm:rounded-2xl p-3"
+  const floating = "w-[274px] rounded-2xl p-3 z-20"
   return `${variant === "float" ? floating : compact} ${extra}`
 }
 
@@ -13,8 +13,7 @@ function OvertradingCard({ variant }: { variant: CardVariant }) {
     <div
       className={cardShell(
         variant,
-        "bg-slate-900/90 backdrop-blur-md border border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.15)]",
-        "animate-float-card-a"
+        "bg-slate-900/90 backdrop-blur-md border border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.15)]"
       )}
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -22,7 +21,7 @@ function OvertradingCard({ variant }: { variant: CardVariant }) {
           <div className="w-8 h-8 rounded-lg bg-red-500/20 border border-red-500/30 flex items-center justify-center flex-shrink-0">
             <ShieldAlert className="w-4 h-4 text-red-400" />
           </div>
-          <h4 className="min-w-0 text-xs sm:text-sm font-bold tracking-wide text-red-400 leading-tight">
+          <h4 className="min-w-0 text-[11px] sm:text-xs font-bold tracking-wide text-red-400 leading-tight">
             OVERTRADING BLOCKED
           </h4>
         </div>
@@ -43,8 +42,8 @@ function OvertradingCard({ variant }: { variant: CardVariant }) {
         <p className="text-[10px] text-red-300 mt-1.5">2/2 used · 3rd blocked</p>
       </div>
 
-      <p className="text-xs text-slate-300 leading-relaxed">
-        Pokušaj otvaranja 3. emotivne pozicije automatski blokiran. Sistem je zaštitio $1,200 vašeg kapitala.
+      <p className="text-[11px] text-slate-300 leading-relaxed">
+        Attempted 3rd emotional entry automatically blocked. System protected $1,200 of your capital.
       </p>
     </div>
   )
@@ -55,8 +54,7 @@ function Tp1Card({ variant }: { variant: CardVariant }) {
     <div
       className={cardShell(
         variant,
-        "bg-slate-900/90 backdrop-blur-md border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)]",
-        "animate-float-card-b"
+        "bg-slate-900/90 backdrop-blur-md border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)]"
       )}
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -64,7 +62,7 @@ function Tp1Card({ variant }: { variant: CardVariant }) {
           <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <h4 className="min-w-0 text-xs sm:text-sm font-bold tracking-wide text-emerald-400 leading-tight">
+          <h4 className="min-w-0 text-[11px] sm:text-xs font-bold tracking-wide text-emerald-400 leading-tight">
             PROFIT LOCKED IN
           </h4>
         </div>
@@ -86,8 +84,8 @@ function Tp1Card({ variant }: { variant: CardVariant }) {
         </div>
       </div>
 
-      <p className="text-xs text-slate-300 leading-relaxed">
-        30% pozicije automatski zatvoreno na TP1. Preostali deo je osiguran bez mogućnosti gubitka.
+      <p className="text-[11px] text-slate-300 leading-relaxed">
+        30% position automatically closed at TP1. Remaining position secured risk-free.
       </p>
     </div>
   )
@@ -98,8 +96,7 @@ function SidewaysCard({ variant }: { variant: CardVariant }) {
     <div
       className={cardShell(
         variant,
-        "bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.15)]",
-        "animate-float-card-c"
+        "bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.15)]"
       )}
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -107,7 +104,7 @@ function SidewaysCard({ variant }: { variant: CardVariant }) {
           <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center flex-shrink-0">
             <Timer className="w-4 h-4 text-cyan-400" />
           </div>
-          <h4 className="min-w-0 text-xs sm:text-sm font-bold tracking-wide text-cyan-400 leading-tight">
+          <h4 className="min-w-0 text-[11px] sm:text-xs font-bold tracking-wide text-cyan-400 leading-tight">
             EMOTIONAL SHIELD
           </h4>
         </div>
@@ -124,8 +121,8 @@ function SidewaysCard({ variant }: { variant: CardVariant }) {
         </div>
       </div>
 
-      <p className="text-xs text-slate-300 leading-relaxed">
-        Tržište je u bočnom kretanju bez volumena. Bot predlaže pauzu od ekrana radi sprečavanja revenge trading-a.
+      <p className="text-[11px] text-slate-300 leading-relaxed">
+        Market is moving sideways without volume. Bot suggests screen break to prevent revenge trading.
       </p>
     </div>
   )

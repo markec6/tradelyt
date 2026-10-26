@@ -4,7 +4,7 @@ Jedini izvor istine za Tradelyt. Svaki naredni chat, agent i linija koda polaze 
 
 Ako kod, kopija ili šema odstupaju od ovog dokumenta, dokument pobedjuje. Promena pravila ide prvo ovde, pa tek onda u kod. Ne izmišljati ponašanje koje ovde nije zapisano.
 
-Poslednje zaključavanje pravila: 2026-09-23.
+Poslednje zaključavanje pravila: 2026-09-23. Partner landing copy dopunjen 2026-10-23 (poglavlje 3.4). Šema na Neon-u primenjena 2026-10-24 (poglavlje 18).
 
 ---
 
@@ -79,6 +79,18 @@ Jedan paket. Nema tierova.
 3D kartica na landingu je vizuelni modal. Ona otvara Stripe Checkout. Forma na našem domenu nikad ne prima broj kartice, CVC ni datum isteka.
 
 Trial je naš sat, ne Stripe trial. Stripe pretplata počinje tek kad korisnik plati, odmah po 30 USD, bez Stripe trial perioda. `trial_ends_at` piše aplikacija u trenutku kad se Telegram nalog poveže.
+
+### 3.4 Partner program (landing copy)
+
+Landing sekcija "Educator & Community Partner Program" opisuje B2B2C ponudu za edukatore i lidere grupa. Ovo je samo marketinški tekst na landingu. Nije deo V1 runtime-a: nema partner koda, nema isplate, nema drugog paketa i nema druge cene.
+
+Zaključano za landing copy:
+
+- Jedan paket ostaje 30 USD mesečno. Partner ne menja cenu pretplate.
+- Revenue share je do 50% mesečne pretplate, za svakog aktivnog člana koji koristi partner kod edukatora.
+- CTA "Apply for Partner Access" otvara `mailto:partners@tradelyt.com`.
+- Mikrocopy: instant odobrenje za zajednice sa 50+ članova. To je obećanje na landingu, ne automatski sistem u V1.
+- Implementacija partner koda, atribucije i isplata ide posle V1. Dok toga nema, ne dodavati tabele, Stripe Connect ni rute.
 
 ---
 
@@ -825,3 +837,36 @@ Sva 34 pitanja su zatvorena 2026-09-23. Skraćeni zapis da se ne otvaraju ponovo
 32. Javna cena za manual/webhook: Bybit.
 33. Brend je samo Tradelyt. Čišćenje landinga je sledeći zadatak.
 34. V1 je Stripe, Telegram, Bybit, tri moda, manual. Binance, OKX, BingX i webhook su V1.1.
+
+---
+
+## 18. Baza na Neon-u
+
+Živa šema je `db/migrations/0001_init.sql`, primenjena 2026-10-24 na praznu bazu. Sledeći korak je `drizzle-kit pull` u `packages/db` (Drizzle još nije instaliran). Ručni SQL ostaje samo u tom migracionom fajlu.
+
+| Stavka | Vrednost |
+|---|---|
+| Projekat | Tradelyt, `polished-art-66851047` |
+| Grana | `production`, `br-withered-mountain-b5kvvihr` |
+| Baza | `neondb`, šema `public`, PostgreSQL 18 |
+| Migracija | `00d939fb-e167-4bc0-92ae-0c58c99dc5ed` |
+| Tabele | `users`, `bot_settings`, `trades`, `daily_analytics`, `notifications_log` |
+
+Konvencije koje baza sada sprovodi:
+
+- Primarni ključ: `uuid`, `gen_random_uuid()` (UUID v4, bez ekstenzije).
+- Vremena: `timestamptz`, default `now()`. Svaka tabela ima `created_at` i `updated_at`. Triggera nema; `updated_at` postavlja aplikacija.
+- Email: `citext`, UNIQUE, case-insensitive.
+- `country`: `char(2)`, ISO 3166-1 alpha-2, velika slova.
+- Cene i `pnl_amount`: `numeric(20,8)`. Procenti: `numeric(5,2)`. Drawdown i rizik po trejdu: 0–100.
+- `subscription_status`: `inactive` | `trial` | `active` | `past_due` | `canceled`. Default `inactive`.
+- `discipline_mode`: `soft` | `strict` | `locked`. Default `soft`.
+- `exchange_name`: `binance` | `bybit`, ili NULL dok berza nije povezana.
+- `position_type`: `long` | `short`. `trades.status`: `open` | `closed` | `canceled` | `stopped`. Default `open`.
+- `notification_type`: `trade_opened` | `trade_closed` | `sl_hit` | `tp_hit` | `rule_broken` | `daily_summary` | `system`.
+- `api_key` i `api_secret` su `text`. Aplikacija upisuje jedan string `iv:tag:ciphertext` (AES-256-GCM). IV, tag i verzija ključa nisu posebne kolone. Enkripcija nije u bazi.
+- `bot_settings.user_id` je UNIQUE (1:1). `daily_analytics` je UNIQUE (`user_id`, `date`).
+- Brisanje korisnika kaskadno briše podešavanja, trejdove, analitiku i log. `notifications_log.trade_id` sme biti NULL; brisanje trejda ga postavlja na NULL.
+- `is_active` default `false`. Brojači i procenti default `0`. `discipline_score` je 0–100.
+
+Poglavlja 7–9 opisuju širi proizvodni cilj (posebna `exchange_keys` tabela, `trialing` / `expired`, modovi `scalper` / `classic` / `moonshot`, odvojeni IV i auth tag). Te tabele i vrednosti nisu u ovoj migraciji. Dok se dokument i šema ne usklade, kod koji dira bazu prati ovo poglavlje i `0001_init.sql`.

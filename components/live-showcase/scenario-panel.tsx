@@ -39,7 +39,7 @@ export function ScenarioPanel({
 
       <div id="scenario-panel" role="tabpanel" aria-labelledby={`scenario-tab-${scenarioIndex}`} className="mt-3">
         <h3 className="text-xl font-semibold text-white md:text-2xl">{scenario.headline}</h3>
-        <p className="mt-2 mb-4 text-sm leading-relaxed text-slate-400">{scenario.body}</p>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">{scenario.body}</p>
       </div>
 
       <div role="tablist" aria-label="Scenario position" className="mt-3 flex items-center gap-2">
