@@ -30,7 +30,7 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
   return (
     <div>
       <p className="text-xs font-medium tracking-wide text-slate-400">Step {step} of 5</p>
-      <div className="mt-3 flex gap-1.5" aria-hidden="true">
+      <div className="mt-2 flex gap-1.5" aria-hidden="true">
         {Array.from({ length: 5 }, (_, index) => (
           <span
             key={index}
@@ -75,7 +75,7 @@ export function OnboardingWizard() {
   }
 
   return (
-    <main className="relative min-h-dvh overflow-x-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+    <main className="relative h-dvh overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
       <div
         className="pointer-events-none fixed inset-0 opacity-30"
         style={{
@@ -89,8 +89,8 @@ export function OnboardingWizard() {
       <div className="pointer-events-none fixed top-0 left-1/3 h-[600px] w-[600px] rounded-full bg-emerald-500/10 blur-[120px]" />
       <div className="pointer-events-none fixed top-1/2 right-0 h-[400px] w-[400px] rounded-full bg-cyan-500/10 blur-[100px]" />
 
-      <div className="relative flex min-h-dvh flex-col px-4 py-8">
-        <section className="my-auto w-full max-w-lg self-center rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-6 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8">
+      <div className="relative flex h-full items-center justify-center px-3 sm:px-4">
+        <section className="max-h-[94dvh] w-full max-w-lg rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-5 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8">
           <StepIndicator step={step} />
 
           <AnimatePresence mode="wait" initial={false}>
@@ -101,8 +101,8 @@ export function OnboardingWizard() {
               exit={reduced ? { opacity: 1, x: 0 } : { opacity: 0, x: -18 }}
               transition={reduced ? { duration: 0 } : { duration: 0.22, ease: "easeOut" }}
             >
-              <h1 className="mt-6 text-2xl font-semibold tracking-tight text-white">{copy.title}</h1>
-              <p className="mt-2 text-sm leading-relaxed text-slate-400">{copy.body}</p>
+              <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white sm:mt-5">{copy.title}</h1>
+              <p className="mt-1.5 text-sm leading-snug text-slate-400">{copy.body}</p>
               {step === 1 ? (
                 <AccountStep draft={draft} errors={errors} onChange={update} onSubmit={submitAccount} />
               ) : (
@@ -111,7 +111,7 @@ export function OnboardingWizard() {
             </motion.div>
           </AnimatePresence>
 
-          <div className="mt-8 flex items-center justify-end gap-3">
+          <div className="mt-5 flex items-center justify-end gap-3 sm:mt-6">
             {step === 1 ? (
               <Link
                 href="/"

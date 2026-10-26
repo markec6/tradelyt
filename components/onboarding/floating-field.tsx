@@ -50,7 +50,7 @@ export function FloatingField({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           className={cn(
-            "peer h-14 w-full rounded-xl border bg-slate-950/70 px-3.5 pb-2 pt-6 text-sm text-white outline-none transition-[border-color,box-shadow] duration-200",
+            "peer h-12 w-full rounded-xl border bg-slate-950/70 px-3.5 pb-1 pt-5 text-sm text-white outline-none transition-[border-color,box-shadow] duration-200 sm:h-14 sm:pb-2 sm:pt-6",
             revealable && "pr-12",
             error
               ? "border-rose-400/80 shadow-[0_0_0_3px_rgba(244,63,94,0.16)]"
@@ -61,7 +61,7 @@ export function FloatingField({
           htmlFor={id}
           className={cn(
             "pointer-events-none absolute left-3.5 transition-all duration-200",
-            floated ? "top-2 text-[11px] tracking-wide" : "top-1/2 -translate-y-1/2 text-sm",
+            floated ? "top-1.5 text-[11px] tracking-wide" : "top-1/2 -translate-y-1/2 text-sm",
             error ? "text-rose-300" : floated && focused ? "text-emerald-300" : "text-slate-400",
           )}
         >
@@ -80,11 +80,11 @@ export function FloatingField({
         )}
       </div>
       {error ? (
-        <p id={`${id}-error`} className="mt-1.5 text-xs text-rose-300">
+        <p id={`${id}-error`} className="mt-1 text-[11px] leading-tight text-rose-300">
           {error}
         </p>
       ) : hint ? (
-        <p id={`${id}-hint`} className="mt-1.5 text-xs text-slate-500">
+        <p id={`${id}-hint`} className="mt-1 text-[11px] leading-tight text-slate-500">
           {hint}
         </p>
       ) : null}

@@ -18,9 +18,9 @@ export function AccountStep({ draft, errors, onChange, onSubmit }: AccountStepPr
         event.preventDefault()
         onSubmit()
       }}
-      className="mt-6 space-y-3"
+      className="mt-4 space-y-2.5 sm:mt-5 sm:space-y-3"
     >
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-2.5 sm:grid-cols-2">
         <FloatingField
           id="firstName"
           label="First name"
