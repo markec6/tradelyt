@@ -1,3 +1,5 @@
+import { callingPrefix, toE164 } from "./phone-number"
+
 export type AccountDraft = {
   firstName: string
   lastName: string
@@ -28,12 +30,11 @@ export const ACCOUNT_FIELD_ORDER: AccountField[] = [
   "email",
   "password",
   "confirmPassword",
-  "phoneNumber",
   "country",
+  "phoneNumber",
 ]
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const PHONE = /^[0-9+\s]{6,20}$/
 
 function nameError(value: string, label: string) {
   const trimmed = value.trim()
@@ -65,13 +66,16 @@ export function validateAccount(draft: AccountDraft): AccountErrors {
     errors.confirmPassword = "Passwords do not match."
   }
 
-  const phone = draft.phoneNumber.trim()
-  if (phone.length > 0 && (!PHONE.test(phone) || !/\d/.test(phone))) {
-    errors.phoneNumber = "Use 6–20 digits, spaces, or +."
-  }
+  const countrySelected = /^[A-Z]{2}$/.test(draft.country)
+  if (!countrySelected) errors.country = "Select your country."
 
-  if (!/^[A-Z]{2}$/.test(draft.country)) {
-    errors.country = "Select your country."
+  const phone = draft.phoneNumber.trim()
+  if (!countrySelected) {
+    errors.phoneNumber = "Select your country first."
+  } else if (!phone || phone === callingPrefix(draft.country)) {
+    errors.phoneNumber = "Enter your phone number."
+  } else if (!toE164(phone, draft.country)) {
+    errors.phoneNumber = "Enter a valid phone number."
   }
 
   return errors

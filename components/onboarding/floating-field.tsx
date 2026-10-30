@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Eye, EyeOff } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -13,8 +13,32 @@ type FloatingFieldProps = {
   error?: string
   type?: "text" | "email" | "password" | "tel"
   autoComplete?: string
+  inputMode?: "text" | "tel" | "email" | "numeric"
+  maxLength?: number
   revealable?: boolean
   hint?: string
+  start?: ReactNode
+}
+
+export function fieldControlClass(active: boolean, error?: string) {
+  return cn(
+    "h-12 w-full rounded-xl border bg-slate-950/70 px-3.5 text-left text-sm text-white outline-none transition-[border-color,box-shadow] duration-200 sm:h-14",
+    error
+      ? "border-rose-400/80 shadow-[0_0_0_3px_rgba(244,63,94,0.16)]"
+      : active
+        ? "border-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.18),0_0_24px_rgba(16,185,129,0.14)]"
+        : "border-slate-700/80 focus:border-emerald-400 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.18),0_0_24px_rgba(16,185,129,0.14)]",
+  )
+}
+
+export function fieldLabelClass(floated: boolean, active: boolean, error?: string) {
+  return cn(
+    "pointer-events-none absolute transition-all duration-200",
+    floated
+      ? "top-0 left-3 z-10 -translate-y-1/2 bg-[#0b0f17] px-1 text-xs"
+      : "top-1/2 left-3.5 -translate-y-1/2 text-sm",
+    error ? "text-rose-300" : active ? "text-emerald-300" : "text-slate-400",
+  )
 }
 
 export function FloatingField({
@@ -25,8 +49,11 @@ export function FloatingField({
   error,
   type = "text",
   autoComplete,
+  inputMode,
+  maxLength,
   revealable = false,
   hint,
+  start,
 }: FloatingFieldProps) {
   const [focused, setFocused] = useState(false)
   const [visible, setVisible] = useState(false)
@@ -36,10 +63,13 @@ export function FloatingField({
   return (
     <div>
       <div className="relative">
+        {start}
         <input
           id={id}
           name={id}
           type={revealable && visible ? "text" : type}
+          inputMode={inputMode}
+          maxLength={maxLength}
           value={value}
           autoComplete={autoComplete}
           autoCapitalize={type === "email" ? "none" : undefined}
@@ -49,21 +79,13 @@ export function FloatingField({
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          className={cn(
-            "peer h-12 w-full rounded-xl border bg-slate-950/70 px-3.5 pb-1 pt-5 text-sm text-white outline-none transition-[border-color,box-shadow] duration-200 sm:h-14 sm:pb-2 sm:pt-6",
-            revealable && "pr-12",
-            error
-              ? "border-rose-400/80 shadow-[0_0_0_3px_rgba(244,63,94,0.16)]"
-              : "border-slate-700/80 focus:border-emerald-400 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.18),0_0_24px_rgba(16,185,129,0.14)]",
-          )}
+          style={start ? { paddingLeft: 52 } : undefined}
+          className={cn(fieldControlClass(focused, error), revealable && "pr-12")}
         />
         <label
           htmlFor={id}
-          className={cn(
-            "pointer-events-none absolute left-3.5 transition-all duration-200",
-            floated ? "top-1.5 text-[11px] tracking-wide" : "top-1/2 -translate-y-1/2 text-sm",
-            error ? "text-rose-300" : floated && focused ? "text-emerald-300" : "text-slate-400",
-          )}
+          style={!floated && start ? { left: 52 } : undefined}
+          className={fieldLabelClass(floated, focused, error)}
         >
           {label}
         </label>
@@ -73,7 +95,7 @@ export function FloatingField({
             aria-label={visible ? "Hide password" : "Show password"}
             aria-pressed={visible}
             onClick={() => setVisible((current) => !current)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 transition-colors duration-200 hover:text-white"
+            className="absolute top-1/2 right-3 -translate-y-1/2 rounded-md p-1 text-slate-400 transition-colors duration-200 hover:text-white"
           >
             {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </button>

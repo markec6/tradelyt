@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useState } from "react"
 
 import { cn } from "@/lib/utils"
+import { saveAccount } from "@/app/onboarding/actions"
 import { AccountStep } from "./account-step"
 import { TelegramPlaceholder } from "./telegram-placeholder"
 import {
@@ -18,7 +19,7 @@ import {
 const STEP_COPY = {
   1: {
     title: "Create your account",
-    body: "Name, email, and country. Your password stays in this tab.",
+    body: "Name, email, and phone.",
   },
   2: {
     title: "Connect Telegram",
@@ -49,7 +50,9 @@ export function OnboardingWizard() {
   const reduced = useReducedMotion()
   const [step, setStep] = useState<1 | 2>(1)
   const [draft, setDraft] = useState<AccountDraft>(EMPTY_ACCOUNT)
+  const [userId, setUserId] = useState<string | null>(null)
   const [errors, setErrors] = useState<AccountErrors>({})
+  const [saving, setSaving] = useState(false)
   const copy = STEP_COPY[step]
 
   function update(patch: Partial<AccountDraft>) {
@@ -63,7 +66,7 @@ export function OnboardingWizard() {
     })
   }
 
-  function submitAccount() {
+  async function submitAccount() {
     const nextErrors = validateAccount(draft)
     setErrors(nextErrors)
     const firstInvalid = ACCOUNT_FIELD_ORDER.find((field) => nextErrors[field])
@@ -71,7 +74,22 @@ export function OnboardingWizard() {
       document.getElementById(firstInvalid)?.focus()
       return
     }
-    setStep(2)
+
+    setSaving(true)
+    try {
+      const result = await saveAccount(draft)
+      if (!result.ok) {
+        setErrors(result.errors)
+        const field = ACCOUNT_FIELD_ORDER.find((key) => result.errors[key])
+        if (field) document.getElementById(field)?.focus()
+        return
+      }
+      setUserId(result.userId)
+      setDraft((current) => ({ ...current, phoneNumber: result.phoneNumber }))
+      setStep(2)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -90,7 +108,10 @@ export function OnboardingWizard() {
       <div className="pointer-events-none fixed top-1/2 right-0 h-[400px] w-[400px] rounded-full bg-cyan-500/10 blur-[100px]" />
 
       <div className="relative flex h-full items-center justify-center px-3 sm:px-4">
-        <section className="max-h-[94dvh] w-full max-w-lg rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-5 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8">
+        <section
+          data-account-id={userId ?? undefined}
+          className="max-h-[94dvh] w-full max-w-lg rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-5 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8"
+        >
           <StepIndicator step={step} />
 
           <AnimatePresence mode="wait" initial={false}>
@@ -132,7 +153,8 @@ export function OnboardingWizard() {
               <button
                 type="submit"
                 form="account-step"
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400"
+                disabled={saving}
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400 disabled:opacity-70"
               >
                 Next
               </button>

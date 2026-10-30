@@ -1,5 +1,7 @@
 import { CountrySelect } from "./country-select"
 import { FloatingField } from "./floating-field"
+import { PhoneField } from "./phone-field"
+import { withDialPrefix } from "./phone-number"
 import type { AccountDraft, AccountErrors } from "./validate-account"
 
 type AccountStepProps = {
@@ -68,20 +70,30 @@ export function AccountStep({ draft, errors, onChange, onSubmit }: AccountStepPr
         error={errors.confirmPassword}
         onChange={(confirmPassword) => onChange({ confirmPassword })}
       />
-      <FloatingField
-        id="phoneNumber"
-        label="Phone (optional)"
-        type="tel"
-        autoComplete="tel"
-        value={draft.phoneNumber}
-        error={errors.phoneNumber}
-        onChange={(phoneNumber) => onChange({ phoneNumber })}
-      />
       <CountrySelect
         id="country"
         value={draft.country}
         error={errors.country}
-        onChange={(country) => onChange({ country })}
+        onChange={(country) => {
+          onChange({
+            country,
+            phoneNumber: withDialPrefix(draft.phoneNumber, draft.country, country),
+          })
+          requestAnimationFrame(() => {
+            const field = document.getElementById("phoneNumber")
+            if (!(field instanceof HTMLInputElement)) return
+            field.focus()
+            const end = field.value.length
+            field.setSelectionRange(end, end)
+          })
+        }}
+      />
+      <PhoneField
+        id="phoneNumber"
+        country={draft.country}
+        value={draft.phoneNumber}
+        error={errors.phoneNumber}
+        onChange={(phoneNumber) => onChange({ phoneNumber })}
       />
     </form>
   )

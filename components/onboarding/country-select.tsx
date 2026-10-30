@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import { countryOptions } from "./countries"
+import { fieldControlClass, fieldLabelClass } from "./floating-field"
 
 type CountrySelectProps = {
   id: string
@@ -102,28 +103,13 @@ export function CountrySelect({ id, value, error, onChange }: CountrySelectProps
             setOpen(true)
           }
         }}
-        className={cn(
-          "h-12 w-full rounded-xl border bg-slate-950/70 px-3.5 pb-1 pt-5 text-left outline-none transition-[border-color,box-shadow] duration-200 sm:h-14 sm:pb-2 sm:pt-6",
-          error
-            ? "border-rose-400/80 shadow-[0_0_0_3px_rgba(244,63,94,0.16)]"
-            : open
-              ? "border-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.18),0_0_24px_rgba(16,185,129,0.14)]"
-              : "border-slate-700/80 focus:border-emerald-400 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.18),0_0_24px_rgba(16,185,129,0.14)]",
-        )}
+        className={fieldControlClass(open, error)}
       >
         <span className={cn("block truncate text-sm", selected ? "text-white" : "text-transparent")}>
           {selected?.name ?? "Country"}
         </span>
       </button>
-      <span
-        className={cn(
-          "pointer-events-none absolute left-3.5 transition-all duration-200",
-          floated ? "top-1.5 text-[11px] tracking-wide" : "top-1/2 -translate-y-1/2 text-sm",
-          error ? "text-rose-300" : open ? "text-emerald-300" : "text-slate-400",
-        )}
-      >
-        Country
-      </span>
+      <span className={fieldLabelClass(floated, open, error)}>Country</span>
 
       {open && (
         <div className="absolute bottom-full left-0 right-0 z-30 mb-1 flex flex-col-reverse overflow-hidden rounded-xl border border-emerald-400/30 bg-slate-950/95 shadow-[0_16px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl">
