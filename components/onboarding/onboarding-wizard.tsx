@@ -5,9 +5,13 @@ import Link from "next/link"
 import { useState } from "react"
 
 import { cn } from "@/lib/utils"
-import { saveAccount } from "@/app/onboarding/actions"
+import { saveAccount, saveExchange, saveRisk, saveTelegram } from "@/app/onboarding/actions"
 import { AccountStep } from "./account-step"
-import { TelegramPlaceholder } from "./telegram-placeholder"
+import { ExchangePlaceholder } from "./exchange-placeholder"
+import { ExchangeStep } from "./exchange-step"
+import { useOnboarding } from "./onboarding-context"
+import { RiskStep } from "./risk-step"
+import { TelegramStep } from "./telegram-step"
 import {
   ACCOUNT_FIELD_ORDER,
   EMPTY_ACCOUNT,
@@ -15,6 +19,15 @@ import {
   type AccountDraft,
   type AccountErrors,
 } from "./validate-account"
+import { EMPTY_TELEGRAM, telegramHandleError, type TelegramDraft } from "./validate-telegram"
+import {
+  EMPTY_EXCHANGE,
+  EXCHANGE_FIELD_ORDER,
+  validateExchange,
+  type ExchangeDraft,
+  type ExchangeErrors,
+} from "./validate-exchange"
+import { EMPTY_RISK, RISK_FIELD_ORDER, validateRisk, type RiskDraft, type RiskErrors } from "./validate-risk"
 
 const STEP_COPY = {
   1: {
@@ -23,11 +36,23 @@ const STEP_COPY = {
   },
   2: {
     title: "Connect Telegram",
-    body: "Alerts land in a private chat. This step is next.",
+    body: "Your name and the alerts you want.",
+  },
+  3: {
+    title: "Connect your exchange",
+    body: "Sandbox keys only.",
+  },
+  4: {
+    title: "Set your risk limits",
+    body: "One strategy and the limits that stop the bot.",
+  },
+  5: {
+    title: "You're ready",
+    body: "",
   },
 } as const
 
-function StepIndicator({ step }: { step: 1 | 2 }) {
+function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 | 5 }) {
   return (
     <div>
       <p className="text-xs font-medium tracking-wide text-slate-400">Step {step} of 5</p>
@@ -48,10 +73,16 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
 
 export function OnboardingWizard() {
   const reduced = useReducedMotion()
-  const [step, setStep] = useState<1 | 2>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   const [draft, setDraft] = useState<AccountDraft>(EMPTY_ACCOUNT)
-  const [userId, setUserId] = useState<string | null>(null)
+  const [telegram, setTelegram] = useState<TelegramDraft>(EMPTY_TELEGRAM)
+  const [exchange, setExchange] = useState<ExchangeDraft>(EMPTY_EXCHANGE)
+  const [risk, setRisk] = useState<RiskDraft>(EMPTY_RISK)
+  const { userId, setUserId } = useOnboarding()
   const [errors, setErrors] = useState<AccountErrors>({})
+  const [telegramErrors, setTelegramErrors] = useState<{ handle?: string; form?: string }>({})
+  const [exchangeErrors, setExchangeErrors] = useState<ExchangeErrors>({})
+  const [riskErrors, setRiskErrors] = useState<RiskErrors>({})
   const [saving, setSaving] = useState(false)
   const copy = STEP_COPY[step]
 
@@ -92,8 +123,134 @@ export function OnboardingWizard() {
     }
   }
 
+  function updateTelegram(patch: Partial<TelegramDraft>) {
+    setTelegram((current) => ({ ...current, ...patch }))
+    setTelegramErrors((current) => {
+      const next = { ...current }
+      if ("handle" in patch) delete next.handle
+      delete next.form
+      return next
+    })
+  }
+
+  async function submitTelegram() {
+    const handleError = telegramHandleError(telegram.handle)
+    if (handleError) {
+      setTelegramErrors({ handle: handleError })
+      document.getElementById("telegramHandle")?.focus()
+      return
+    }
+    if (!userId) {
+      setTelegramErrors({ form: "Save your account before connecting Telegram." })
+      return
+    }
+
+    setSaving(true)
+    try {
+      const result = await saveTelegram({ userId, draft: telegram })
+      if (!result.ok) {
+        setTelegramErrors(result.errors)
+        if (result.errors.handle) document.getElementById("telegramHandle")?.focus()
+        return
+      }
+      setStep(3)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function updateExchange(patch: Partial<ExchangeDraft>) {
+    setExchange((current) => ({ ...current, ...patch }))
+    setExchangeErrors((current) => {
+      const next = { ...current }
+      if ("apiKey" in patch) delete next.apiKey
+      if ("apiSecret" in patch) delete next.apiSecret
+      if ("passphrase" in patch) delete next.passphrase
+      if ("mode" in patch) delete next.form
+      if ("exchange" in patch) {
+        delete next.apiKey
+        delete next.apiSecret
+        delete next.passphrase
+        delete next.form
+      }
+      delete next.form
+      return next
+    })
+  }
+
+  async function submitExchange() {
+    const nextErrors = validateExchange(exchange)
+    setExchangeErrors(nextErrors)
+    if (nextErrors.form) return
+    const field = EXCHANGE_FIELD_ORDER.find((key) => nextErrors[key])
+    if (field) {
+      document.getElementById(field)?.focus()
+      return
+    }
+    if (!userId) {
+      setExchangeErrors({ form: "Save your account before connecting an exchange." })
+      return
+    }
+
+    setSaving(true)
+    try {
+      const result = await saveExchange({ userId, draft: exchange })
+      if (!result.ok) {
+        setExchangeErrors(result.errors)
+        if (result.errors.apiKey) document.getElementById("apiKey")?.focus()
+        else if (result.errors.apiSecret) document.getElementById("apiSecret")?.focus()
+        else if (result.errors.passphrase) document.getElementById("passphrase")?.focus()
+        return
+      }
+      setStep(4)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function updateRisk(patch: Partial<RiskDraft>) {
+    setRisk((current) => ({ ...current, ...patch }))
+    setRiskErrors((current) => {
+      const next = { ...current }
+      if ("maxDrawdown" in patch) delete next.maxDrawdown
+      if ("riskPerTrade" in patch) delete next.riskPerTrade
+      if ("strategy" in patch) delete next.form
+      delete next.form
+      return next
+    })
+  }
+
+  async function submitRisk() {
+    const nextErrors = validateRisk(risk)
+    setRiskErrors(nextErrors)
+    if (nextErrors.form) return
+    const field = RISK_FIELD_ORDER.find((key) => nextErrors[key])
+    if (field) {
+      document.getElementById(field)?.focus()
+      return
+    }
+    if (!userId) {
+      setRiskErrors({ form: "Save your account before setting risk limits." })
+      return
+    }
+
+    setSaving(true)
+    try {
+      const result = await saveRisk({ userId, draft: risk })
+      if (!result.ok) {
+        setRiskErrors(result.errors)
+        if (result.errors.maxDrawdown) document.getElementById("maxDrawdown")?.focus()
+        else if (result.errors.riskPerTrade) document.getElementById("riskPerTrade")?.focus()
+        return
+      }
+      setStep(5)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <main className="relative h-dvh overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+    <main className="relative min-h-dvh bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
       <div
         className="pointer-events-none fixed inset-0 opacity-30"
         style={{
@@ -107,10 +264,10 @@ export function OnboardingWizard() {
       <div className="pointer-events-none fixed top-0 left-1/3 h-[600px] w-[600px] rounded-full bg-emerald-500/10 blur-[120px]" />
       <div className="pointer-events-none fixed top-1/2 right-0 h-[400px] w-[400px] rounded-full bg-cyan-500/10 blur-[100px]" />
 
-      <div className="relative flex h-full items-center justify-center px-3 sm:px-4">
+      <div className="relative flex min-h-dvh flex-col px-3 py-4 sm:px-4">
         <section
           data-account-id={userId ?? undefined}
-          className="max-h-[94dvh] w-full max-w-lg rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-5 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8"
+          className="m-auto w-full max-w-lg rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-5 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8"
         >
           <StepIndicator step={step} />
 
@@ -123,11 +280,28 @@ export function OnboardingWizard() {
               transition={reduced ? { duration: 0 } : { duration: 0.22, ease: "easeOut" }}
             >
               <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white sm:mt-5">{copy.title}</h1>
-              <p className="mt-1.5 text-sm leading-snug text-slate-400">{copy.body}</p>
+              {copy.body ? <p className="mt-1.5 text-sm leading-snug text-slate-400">{copy.body}</p> : null}
               {step === 1 ? (
                 <AccountStep draft={draft} errors={errors} onChange={update} onSubmit={submitAccount} />
+              ) : step === 2 ? (
+                <TelegramStep
+                  draft={telegram}
+                  handleError={telegramErrors.handle}
+                  formError={telegramErrors.form}
+                  onChange={updateTelegram}
+                  onSubmit={submitTelegram}
+                />
+              ) : step === 3 ? (
+                <ExchangeStep
+                  draft={exchange}
+                  errors={exchangeErrors}
+                  onChange={updateExchange}
+                  onSubmit={submitExchange}
+                />
+              ) : step === 4 ? (
+                <RiskStep draft={risk} errors={riskErrors} onChange={updateRisk} onSubmit={submitRisk} />
               ) : (
-                <TelegramPlaceholder />
+                <ExchangePlaceholder />
               )}
             </motion.div>
           </AnimatePresence>
@@ -143,16 +317,18 @@ export function OnboardingWizard() {
             ) : (
               <button
                 type="button"
-                onClick={() => setStep(1)}
+                onClick={() => setStep(step === 5 ? 4 : step === 4 ? 3 : step === 3 ? 2 : 1)}
                 className="inline-flex items-center justify-center rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-300 transition-colors duration-200 hover:border-slate-500 hover:bg-slate-800 hover:text-white"
               >
                 Back
               </button>
             )}
-            {step === 1 && (
+            {step < 5 && (
               <button
                 type="submit"
-                form="account-step"
+                form={
+                  step === 1 ? "account-step" : step === 2 ? "telegram-step" : step === 3 ? "exchange-step" : "risk-step"
+                }
                 disabled={saving}
                 className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400 disabled:opacity-70"
               >

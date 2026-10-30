@@ -13,11 +13,12 @@ type FloatingFieldProps = {
   error?: string
   type?: "text" | "email" | "password" | "tel"
   autoComplete?: string
-  inputMode?: "text" | "tel" | "email" | "numeric"
+  inputMode?: "text" | "tel" | "email" | "numeric" | "decimal"
   maxLength?: number
   revealable?: boolean
   hint?: string
   start?: ReactNode
+  startPadding?: number
 }
 
 export function fieldControlClass(active: boolean, error?: string) {
@@ -35,8 +36,9 @@ export function fieldLabelClass(floated: boolean, active: boolean, error?: strin
   return cn(
     "pointer-events-none absolute transition-all duration-200",
     floated
-      ? "top-0 left-3 z-10 -translate-y-1/2 bg-[#0b0f17] px-1 text-xs"
+      ? "top-0 left-3 z-10 -translate-y-1/2 rounded-full bg-slate-900 px-1.5 py-0.5 leading-none"
       : "top-1/2 left-3.5 -translate-y-1/2 text-sm",
+    floated && (active ? "text-sm font-medium" : "text-xs"),
     error ? "text-rose-300" : active ? "text-emerald-300" : "text-slate-400",
   )
 }
@@ -54,6 +56,7 @@ export function FloatingField({
   revealable = false,
   hint,
   start,
+  startPadding = 52,
 }: FloatingFieldProps) {
   const [focused, setFocused] = useState(false)
   const [visible, setVisible] = useState(false)
@@ -79,12 +82,12 @@ export function FloatingField({
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          style={start ? { paddingLeft: 52 } : undefined}
+          style={start ? { paddingLeft: startPadding } : undefined}
           className={cn(fieldControlClass(focused, error), revealable && "pr-12")}
         />
         <label
           htmlFor={id}
-          style={!floated && start ? { left: 52 } : undefined}
+          style={!floated && start ? { left: startPadding } : undefined}
           className={fieldLabelClass(floated, focused, error)}
         >
           {label}
