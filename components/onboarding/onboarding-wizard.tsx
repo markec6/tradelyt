@@ -2,14 +2,15 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import { cn } from "@/lib/utils"
-import { saveAccount, saveExchange, saveRisk, saveTelegram } from "@/app/onboarding/actions"
+import { launchTradelyt, saveAccount, saveExchange, saveRisk, saveTelegram } from "@/app/onboarding/actions"
 import { AccountStep } from "./account-step"
-import { ExchangePlaceholder } from "./exchange-placeholder"
 import { ExchangeStep } from "./exchange-step"
 import { useOnboarding } from "./onboarding-context"
+import { ReviewStep } from "./review-step"
 import { RiskStep } from "./risk-step"
 import { TelegramStep } from "./telegram-step"
 import {
@@ -27,7 +28,14 @@ import {
   type ExchangeDraft,
   type ExchangeErrors,
 } from "./validate-exchange"
-import { EMPTY_RISK, RISK_FIELD_ORDER, validateRisk, type RiskDraft, type RiskErrors } from "./validate-risk"
+import {
+  EMPTY_RISK,
+  RISK_FIELD_ORDER,
+  validateRisk,
+  withDefaults,
+  type RiskDraft,
+  type RiskErrors,
+} from "./validate-risk"
 
 const STEP_COPY = {
   1: {
@@ -47,8 +55,8 @@ const STEP_COPY = {
     body: "One strategy and the limits that stop the bot.",
   },
   5: {
-    title: "You're ready",
-    body: "",
+    title: "Review and launch",
+    body: "Telegram, exchange, strategy, and risk.",
   },
 } as const
 
@@ -73,6 +81,7 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 | 5 }) {
 
 export function OnboardingWizard() {
   const reduced = useReducedMotion()
+  const router = useRouter()
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   const [draft, setDraft] = useState<AccountDraft>(EMPTY_ACCOUNT)
   const [telegram, setTelegram] = useState<TelegramDraft>(EMPTY_TELEGRAM)
@@ -83,6 +92,7 @@ export function OnboardingWizard() {
   const [telegramErrors, setTelegramErrors] = useState<{ handle?: string; form?: string }>({})
   const [exchangeErrors, setExchangeErrors] = useState<ExchangeErrors>({})
   const [riskErrors, setRiskErrors] = useState<RiskErrors>({})
+  const [launchError, setLaunchError] = useState("")
   const [saving, setSaving] = useState(false)
   const copy = STEP_COPY[step]
 
@@ -221,7 +231,9 @@ export function OnboardingWizard() {
   }
 
   async function submitRisk() {
-    const nextErrors = validateRisk(risk)
+    const draft = withDefaults(risk)
+    if (draft.maxDrawdown !== risk.maxDrawdown || draft.riskPerTrade !== risk.riskPerTrade) setRisk(draft)
+    const nextErrors = validateRisk(draft)
     setRiskErrors(nextErrors)
     if (nextErrors.form) return
     const field = RISK_FIELD_ORDER.find((key) => nextErrors[key])
@@ -236,7 +248,7 @@ export function OnboardingWizard() {
 
     setSaving(true)
     try {
-      const result = await saveRisk({ userId, draft: risk })
+      const result = await saveRisk({ userId, draft })
       if (!result.ok) {
         setRiskErrors(result.errors)
         if (result.errors.maxDrawdown) document.getElementById("maxDrawdown")?.focus()
@@ -244,6 +256,26 @@ export function OnboardingWizard() {
         return
       }
       setStep(5)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function launch() {
+    if (!userId) {
+      setLaunchError("Save your account before launching.")
+      return
+    }
+
+    setSaving(true)
+    setLaunchError("")
+    try {
+      const result = await launchTradelyt(userId)
+      if (!result.ok) {
+        setLaunchError(result.error)
+        return
+      }
+      router.push("/dashboard")
     } finally {
       setSaving(false)
     }
@@ -301,12 +333,13 @@ export function OnboardingWizard() {
               ) : step === 4 ? (
                 <RiskStep draft={risk} errors={riskErrors} onChange={updateRisk} onSubmit={submitRisk} />
               ) : (
-                <ExchangePlaceholder />
+                <ReviewStep telegram={telegram} exchange={exchange} risk={risk} />
               )}
             </motion.div>
           </AnimatePresence>
 
-          <div className="mt-5 flex items-center justify-end gap-3 sm:mt-6">
+          <div className="mt-5 sm:mt-6">
+            <div className="flex items-center justify-end gap-3">
             {step === 1 ? (
               <Link
                 href="/"
@@ -317,13 +350,16 @@ export function OnboardingWizard() {
             ) : (
               <button
                 type="button"
-                onClick={() => setStep(step === 5 ? 4 : step === 4 ? 3 : step === 3 ? 2 : 1)}
+                onClick={() => {
+                  setLaunchError("")
+                  setStep(step === 5 ? 4 : step === 4 ? 3 : step === 3 ? 2 : 1)
+                }}
                 className="inline-flex items-center justify-center rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-300 transition-colors duration-200 hover:border-slate-500 hover:bg-slate-800 hover:text-white"
               >
                 Back
               </button>
             )}
-            {step < 5 && (
+            {step < 5 ? (
               <button
                 type="submit"
                 form={
@@ -334,7 +370,18 @@ export function OnboardingWizard() {
               >
                 Next
               </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void launch()}
+                disabled={saving}
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400 disabled:opacity-70"
+              >
+                Launch Tradelyt
+              </button>
             )}
+            </div>
+            {launchError ? <p className="mt-2 text-right text-[11px] leading-tight text-rose-300">{launchError}</p> : null}
           </div>
         </section>
       </div>

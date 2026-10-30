@@ -17,6 +17,7 @@ type FloatingFieldProps = {
   maxLength?: number
   revealable?: boolean
   hint?: string
+  hintAccent?: boolean
   start?: ReactNode
   startPadding?: number
 }
@@ -55,6 +56,7 @@ export function FloatingField({
   maxLength,
   revealable = false,
   hint,
+  hintAccent = false,
   start,
   startPadding = 52,
 }: FloatingFieldProps) {
@@ -109,7 +111,13 @@ export function FloatingField({
           {error}
         </p>
       ) : hint ? (
-        <p id={`${id}-hint`} className="mt-1 text-[11px] leading-tight text-slate-500">
+        <p
+          id={`${id}-hint`}
+          className={cn(
+            "mt-1 text-[11px] leading-tight",
+            hintAccent ? "font-medium text-emerald-300/90" : "text-slate-500",
+          )}
+        >
           {hint}
         </p>
       ) : null}

@@ -9,7 +9,7 @@ import { toE164 } from "@/components/onboarding/phone-number"
 import { validateAccount, type AccountDraft, type AccountErrors } from "@/components/onboarding/validate-account"
 import { telegramHandleError, type TelegramDraft } from "@/components/onboarding/validate-telegram"
 import { validateExchange, type ExchangeDraft, type ExchangeErrors } from "@/components/onboarding/validate-exchange"
-import { validateRisk, type RiskDraft, type RiskErrors } from "@/components/onboarding/validate-risk"
+import { validateRisk, withDefaults, type RiskDraft, type RiskErrors } from "@/components/onboarding/validate-risk"
 import { encryptionKey, sealSecret } from "@/app/onboarding/secret-box"
 
 const scryptAsync = promisify(scrypt)
@@ -190,15 +190,16 @@ export async function saveRisk(input: {
     return { ok: false, errors: { form: "Save your account before setting risk limits." } }
   }
 
-  const errors = validateRisk(input.draft)
+  const draft = withDefaults(input.draft)
+  const errors = validateRisk(draft)
   if (Object.keys(errors).length > 0) return { ok: false, errors }
-  if (!input.draft.strategy) return { ok: false, errors: { form: "Choose a strategy." } }
+  if (!draft.strategy) return { ok: false, errors: { form: "Choose a strategy." } }
 
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) return { ok: false, errors: { form: "Could not save your risk limits." } }
 
-  const maxDrawdown = input.draft.maxDrawdown.trim()
-  const riskPerTrade = input.draft.riskPerTrade.trim()
+  const maxDrawdown = draft.maxDrawdown
+  const riskPerTrade = draft.riskPerTrade
 
   try {
     const sql = neon(databaseUrl)
@@ -236,5 +237,28 @@ export async function saveRisk(input: {
     return { ok: true }
   } catch {
     return { ok: false, errors: { form: "Could not save your risk limits." } }
+  }
+}
+
+export async function launchTradelyt(
+  userId: string | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!userId) return { ok: false, error: "Save your account before launching." }
+
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) return { ok: false, error: "Could not launch Tradelyt." }
+
+  try {
+    const sql = neon(databaseUrl)
+    const updated = await sql`
+      UPDATE bot_settings
+      SET is_active = true, updated_at = now()
+      WHERE user_id = ${userId}
+      RETURNING id
+    `
+    if (!updated[0]?.id) return { ok: false, error: "Could not launch Tradelyt." }
+    return { ok: true }
+  } catch {
+    return { ok: false, error: "Could not launch Tradelyt." }
   }
 }

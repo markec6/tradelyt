@@ -2,7 +2,13 @@
 
 import { cn } from "@/lib/utils"
 import { FloatingField } from "./floating-field"
-import type { RiskDraft, RiskErrors, StrategyId } from "./validate-risk"
+import {
+  DEFAULT_MAX_DRAWDOWN,
+  DEFAULT_RISK_PER_TRADE,
+  type RiskDraft,
+  type RiskErrors,
+  type StrategyId,
+} from "./validate-risk"
 
 type RiskStepProps = {
   draft: RiskDraft
@@ -65,6 +71,8 @@ export function RiskStep({ draft, errors, onChange, onSubmit }: RiskStepProps) {
         maxLength={5}
         value={draft.maxDrawdown}
         error={errors.maxDrawdown}
+        hint={`Optimal default: ${DEFAULT_MAX_DRAWDOWN}%`}
+        hintAccent
         onChange={(maxDrawdown) => onChange({ maxDrawdown })}
       />
       <FloatingField
@@ -75,6 +83,8 @@ export function RiskStep({ draft, errors, onChange, onSubmit }: RiskStepProps) {
         maxLength={5}
         value={draft.riskPerTrade}
         error={errors.riskPerTrade}
+        hint={`Optimal default: ${DEFAULT_RISK_PER_TRADE}%`}
+        hintAccent
         onChange={(riskPerTrade) => onChange({ riskPerTrade })}
       />
       <div className="space-y-2">
