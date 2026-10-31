@@ -21,6 +21,7 @@ import {
   type AccountErrors,
 } from "./validate-account"
 import { EMPTY_TELEGRAM, telegramHandleError, type TelegramDraft } from "./validate-telegram"
+import type { OnboardingResume } from "./resume"
 import {
   EMPTY_EXCHANGE,
   EXCHANGE_FIELD_ORDER,
@@ -56,7 +57,7 @@ const STEP_COPY = {
   },
   5: {
     title: "Review and launch",
-    body: "Telegram, exchange, strategy, and risk.",
+    body: "Telegram, exchange, strategy, and risk. Next: start your free trial.",
   },
 } as const
 
@@ -79,14 +80,14 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 | 5 }) {
   )
 }
 
-export function OnboardingWizard() {
+export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }) {
   const reduced = useReducedMotion()
   const router = useRouter()
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
-  const [draft, setDraft] = useState<AccountDraft>(EMPTY_ACCOUNT)
-  const [telegram, setTelegram] = useState<TelegramDraft>(EMPTY_TELEGRAM)
-  const [exchange, setExchange] = useState<ExchangeDraft>(EMPTY_EXCHANGE)
-  const [risk, setRisk] = useState<RiskDraft>(EMPTY_RISK)
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(resume?.step ?? 1)
+  const [draft, setDraft] = useState<AccountDraft>(resume?.account ?? EMPTY_ACCOUNT)
+  const [telegram, setTelegram] = useState<TelegramDraft>(resume?.telegram ?? EMPTY_TELEGRAM)
+  const [exchange, setExchange] = useState<ExchangeDraft>(resume?.exchange ?? EMPTY_EXCHANGE)
+  const [risk, setRisk] = useState<RiskDraft>(resume?.risk ?? EMPTY_RISK)
   const { userId, setUserId } = useOnboarding()
   const [errors, setErrors] = useState<AccountErrors>({})
   const [telegramErrors, setTelegramErrors] = useState<{ handle?: string; form?: string }>({})
@@ -108,7 +109,8 @@ export function OnboardingWizard() {
   }
 
   async function submitAccount() {
-    const nextErrors = validateAccount(draft)
+    const keepPassword = Boolean(userId) && draft.password.length === 0 && draft.confirmPassword.length === 0
+    const nextErrors = validateAccount(draft, { keepPassword })
     setErrors(nextErrors)
     const firstInvalid = ACCOUNT_FIELD_ORDER.find((field) => nextErrors[field])
     if (firstInvalid) {
@@ -157,7 +159,7 @@ export function OnboardingWizard() {
 
     setSaving(true)
     try {
-      const result = await saveTelegram({ userId, draft: telegram })
+      const result = await saveTelegram(telegram)
       if (!result.ok) {
         setTelegramErrors(result.errors)
         if (result.errors.handle) document.getElementById("telegramHandle")?.focus()
@@ -204,7 +206,7 @@ export function OnboardingWizard() {
 
     setSaving(true)
     try {
-      const result = await saveExchange({ userId, draft: exchange })
+      const result = await saveExchange(exchange)
       if (!result.ok) {
         setExchangeErrors(result.errors)
         if (result.errors.apiKey) document.getElementById("apiKey")?.focus()
@@ -248,7 +250,7 @@ export function OnboardingWizard() {
 
     setSaving(true)
     try {
-      const result = await saveRisk({ userId, draft })
+      const result = await saveRisk(draft)
       if (!result.ok) {
         setRiskErrors(result.errors)
         if (result.errors.maxDrawdown) document.getElementById("maxDrawdown")?.focus()
@@ -270,12 +272,12 @@ export function OnboardingWizard() {
     setSaving(true)
     setLaunchError("")
     try {
-      const result = await launchTradelyt(userId)
+      const result = await launchTradelyt()
       if (!result.ok) {
         setLaunchError(result.error)
         return
       }
-      router.push("/dashboard")
+      router.push("/checkout")
     } finally {
       setSaving(false)
     }
@@ -314,7 +316,17 @@ export function OnboardingWizard() {
               <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white sm:mt-5">{copy.title}</h1>
               {copy.body ? <p className="mt-1.5 text-sm leading-snug text-slate-400">{copy.body}</p> : null}
               {step === 1 ? (
-                <AccountStep draft={draft} errors={errors} onChange={update} onSubmit={submitAccount} />
+                <AccountStep
+                  draft={draft}
+                  errors={errors}
+                  passwordHint={
+                    userId
+                      ? "Leave blank to keep your password. Or use 8+ characters, with a letter and a number."
+                      : undefined
+                  }
+                  onChange={update}
+                  onSubmit={submitAccount}
+                />
               ) : step === 2 ? (
                 <TelegramStep
                   draft={telegram}

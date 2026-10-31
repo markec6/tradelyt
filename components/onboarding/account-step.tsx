@@ -1,3 +1,5 @@
+import Link from "next/link"
+
 import { CountrySelect } from "./country-select"
 import { FloatingField } from "./floating-field"
 import { PhoneField } from "./phone-field"
@@ -7,11 +9,12 @@ import type { AccountDraft, AccountErrors } from "./validate-account"
 type AccountStepProps = {
   draft: AccountDraft
   errors: AccountErrors
+  passwordHint?: string
   onChange: (patch: Partial<AccountDraft>) => void
   onSubmit: () => void
 }
 
-export function AccountStep({ draft, errors, onChange, onSubmit }: AccountStepProps) {
+export function AccountStep({ draft, errors, passwordHint, onChange, onSubmit }: AccountStepProps) {
   return (
     <form
       id="account-step"
@@ -49,13 +52,19 @@ export function AccountStep({ draft, errors, onChange, onSubmit }: AccountStepPr
         error={errors.email}
         onChange={(email) => onChange({ email })}
       />
+      <p className="text-right text-[11px] leading-tight text-slate-500">
+        Already have an account?{" "}
+        <Link href="/login" className="font-medium text-emerald-300 hover:text-emerald-200">
+          Sign in
+        </Link>
+      </p>
       <FloatingField
         id="password"
         label="Password"
         type="password"
         autoComplete="new-password"
         revealable
-        hint="At least 8 characters, with a letter and a number."
+        hint={passwordHint ?? "At least 8 characters, with a letter and a number."}
         value={draft.password}
         error={errors.password}
         onChange={(password) => onChange({ password })}

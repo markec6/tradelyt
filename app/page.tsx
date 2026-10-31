@@ -4,10 +4,16 @@ import { ProductMockup } from "@/components/hero/product-mockup"
 import { RobotSection } from "@/components/hero/robot-section"
 import { LiveShowcaseSection } from "@/components/live-showcase/live-showcase-section"
 import { PartnerProgramSection } from "@/components/partner-program/partner-program-section"
+import { loadSessionProfile } from "@/lib/profile"
 
-export default function Home() {
+export const dynamic = "force-dynamic"
+
+export default async function Home() {
+  const profile = await loadSessionProfile()
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 overflow-hidden">
+    <>
+      <Navigation profile={profile} />
+      <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 overflow-hidden">
       {/* Background Grid Pattern */}
       <div 
         className="fixed inset-0 opacity-30 pointer-events-none"
@@ -24,11 +30,7 @@ export default function Home() {
       <div className="fixed top-0 left-1/3 w-[600px] h-[600px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed top-1/2 right-0 w-[400px] h-[400px] bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none" />
       <div className="fixed bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
-      
-      {/* Navigation */}
-      <Navigation />
-      
-      {/* Hero Content */}
+
       <div className="relative">
         <HeaderSection />
         <ProductMockup />
@@ -38,5 +40,6 @@ export default function Home() {
       <LiveShowcaseSection />
       <PartnerProgramSection />
     </main>
+    </>
   )
 }

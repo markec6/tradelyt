@@ -1,29 +1,55 @@
 "use server"
 
-import { randomBytes, scrypt } from "node:crypto"
-import { promisify } from "node:util"
-
+import { and, eq } from "drizzle-orm"
 import { neon } from "@neondatabase/serverless"
 
+import { encryptionKey, sealSecret } from "@/app/onboarding/secret-box"
 import { toE164 } from "@/components/onboarding/phone-number"
 import { validateAccount, type AccountDraft, type AccountErrors } from "@/components/onboarding/validate-account"
-import { telegramHandleError, type TelegramDraft } from "@/components/onboarding/validate-telegram"
 import { validateExchange, type ExchangeDraft, type ExchangeErrors } from "@/components/onboarding/validate-exchange"
 import { validateRisk, withDefaults, type RiskDraft, type RiskErrors } from "@/components/onboarding/validate-risk"
-import { encryptionKey, sealSecret } from "@/app/onboarding/secret-box"
+import { telegramHandleError, type TelegramDraft } from "@/components/onboarding/validate-telegram"
+import { getDb } from "@/db"
+import { users } from "@/db/schema"
+import { cardConnected } from "@/lib/subscriptions"
+import { hashPassword } from "@/lib/password"
+import { readActorUserId, setOnboardingCookie } from "@/lib/session-store"
 
-const scryptAsync = promisify(scrypt)
+const EMAIL_TAKEN = "An account with this email already exists."
+const PHONE_TAKEN = "This phone number is already in use."
 
-async function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("base64url")
-  const derived = (await scryptAsync(password, salt, 32)) as Buffer
-  return `scrypt$${salt}$${derived.toString("base64url")}`
+function constraintName(error: unknown) {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current)
+    if ("constraint" in current && typeof current.constraint === "string") return current.constraint
+    if ("message" in current && typeof current.message === "string") {
+      const match = current.message.match(/unique constraint "([^"]+)"/)
+      if (match) return match[1]
+    }
+    current = "cause" in current ? current.cause : undefined
+  }
+  return ""
+}
+
+function rethrowConfig(error: unknown) {
+  if (!(error instanceof Error)) return
+  if (
+    error.message === "PASSWORD_PEPPER is not set" ||
+    error.message === "SESSION_SECRET is not set" ||
+    error.message === "DATABASE_URL is not set"
+  ) {
+    throw error
+  }
 }
 
 export async function saveAccount(
   draft: AccountDraft,
 ): Promise<{ ok: true; userId: string; phoneNumber: string } | { ok: false; errors: AccountErrors }> {
-  const errors = validateAccount(draft)
+  const actorId = await readActorUserId()
+  const keepPassword = Boolean(actorId) && draft.password.length === 0 && draft.confirmPassword.length === 0
+  const errors = validateAccount(draft, { keepPassword })
   if (Object.keys(errors).length > 0) return { ok: false, errors }
 
   const phoneNumber = toE164(draft.phoneNumber, draft.country)
@@ -36,48 +62,77 @@ export async function saveAccount(
     return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
   }
 
+  const email = draft.email.trim()
+  const profile = {
+    email,
+    firstName: draft.firstName.trim(),
+    lastName: draft.lastName.trim(),
+    phoneNumber,
+    country: draft.country,
+    updatedAt: new Date(),
+  }
+
   try {
-    const passwordHash = await hashPassword(draft.password)
-    const sql = neon(databaseUrl)
-    const rows = await sql`
-      INSERT INTO users (email, password_hash, first_name, last_name, phone_number, country)
-      VALUES (
-        ${draft.email.trim()},
-        ${passwordHash},
-        ${draft.firstName.trim()},
-        ${draft.lastName.trim()},
-        ${phoneNumber},
-        ${draft.country}
-      )
-      ON CONFLICT (email)
-      DO UPDATE SET
-        password_hash = EXCLUDED.password_hash,
-        first_name = EXCLUDED.first_name,
-        last_name = EXCLUDED.last_name,
-        phone_number = EXCLUDED.phone_number,
-        country = EXCLUDED.country,
-        updated_at = now()
-      RETURNING id
-    `
-    const userId = rows[0]?.id
-    if (!userId) {
-      return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
+    const db = getDb()
+    const existing = actorId
+      ? await db
+          .select({ id: users.id, accountStatus: users.accountStatus, sessionVersion: users.sessionVersion })
+          .from(users)
+          .where(eq(users.id, actorId))
+          .limit(1)
+      : await db
+          .select({ id: users.id, accountStatus: users.accountStatus, sessionVersion: users.sessionVersion })
+          .from(users)
+          .where(eq(users.email, email))
+          .limit(1)
+    const current = existing[0]
+
+    if (current) {
+      if (current.accountStatus !== "pending" || (await cardConnected(current.id))) {
+        return { ok: false, errors: { email: EMAIL_TAKEN } }
+      }
+      const passwordHash = keepPassword ? null : await hashPassword(draft.password)
+      const updated = await db
+        .update(users)
+        .set(passwordHash ? { ...profile, passwordHash } : profile)
+        .where(and(eq(users.id, current.id), eq(users.accountStatus, "pending")))
+        .returning({ id: users.id, sessionVersion: users.sessionVersion })
+      const row = updated[0]
+      if (!row) return { ok: false, errors: { email: EMAIL_TAKEN } }
+      await setOnboardingCookie(row.id, row.sessionVersion)
+      return { ok: true, userId: row.id, phoneNumber }
     }
-    return { ok: true, userId: String(userId), phoneNumber }
-  } catch {
+
+    const inserted = await db
+      .insert(users)
+      .values({ ...profile, passwordHash: await hashPassword(draft.password), accountStatus: "pending" })
+      .returning({ id: users.id, sessionVersion: users.sessionVersion })
+    const row = inserted[0]
+    if (!row) return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
+    await setOnboardingCookie(row.id, row.sessionVersion)
+    return { ok: true, userId: row.id, phoneNumber }
+  } catch (error) {
+    rethrowConfig(error)
+    const constraint = constraintName(error)
+    if (constraint === "users_email_key") return { ok: false, errors: { email: EMAIL_TAKEN } }
+    if (constraint === "users_phone_number_key") return { ok: false, errors: { phoneNumber: PHONE_TAKEN } }
     return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
   }
 }
 
-export async function saveTelegram(input: {
-  userId: string | null
-  draft: TelegramDraft
-}): Promise<{ ok: true } | { ok: false; errors: { handle?: string; form?: string } }> {
-  if (!input.userId) {
+export async function saveTelegram(
+  draft: TelegramDraft,
+): Promise<{ ok: true } | { ok: false; errors: { handle?: string; form?: string } }> {
+  const userId = await readActorUserId()
+  if (!userId) {
     return { ok: false, errors: { form: "Save your account before connecting Telegram." } }
   }
 
-  const handle = input.draft.handle.replace(/^@+/, "")
+  if (await cardConnected(userId)) {
+    return { ok: false, errors: { form: "Your trial is already confirmed." } }
+  }
+
+  const handle = draft.handle.replace(/^@+/, "")
   const handleError = telegramHandleError(handle)
   if (handleError) return { ok: false, errors: { handle: handleError } }
 
@@ -92,7 +147,7 @@ export async function saveTelegram(input: {
       sql`
         UPDATE users
         SET telegram_username = ${handle}, updated_at = now()
-        WHERE id = ${input.userId}
+        WHERE id = ${userId}
         RETURNING id
       `,
       sql`
@@ -103,10 +158,10 @@ export async function saveTelegram(input: {
           notify_daily_pnl
         )
         VALUES (
-          ${input.userId},
-          ${input.draft.tradeExecutions},
-          ${input.draft.riskWarnings},
-          ${input.draft.dailyPnl}
+          ${userId},
+          ${draft.tradeExecutions},
+          ${draft.riskWarnings},
+          ${draft.dailyPnl}
         )
         ON CONFLICT (user_id)
         DO UPDATE SET
@@ -129,26 +184,26 @@ export async function saveTelegram(input: {
   }
 }
 
-export async function saveExchange(input: {
-  userId: string | null
-  draft: ExchangeDraft
-}): Promise<{ ok: true } | { ok: false; errors: ExchangeErrors }> {
-  if (!input.userId) {
+export async function saveExchange(
+  draft: ExchangeDraft,
+): Promise<{ ok: true } | { ok: false; errors: ExchangeErrors }> {
+  const userId = await readActorUserId()
+  if (!userId) {
     return { ok: false, errors: { form: "Save your account before connecting an exchange." } }
   }
 
-  const errors = validateExchange(input.draft)
+  const errors = validateExchange(draft)
   if (Object.keys(errors).length > 0) return { ok: false, errors }
 
   const key = encryptionKey()
   if (!key) return { ok: false, errors: { form: "Could not save your exchange." } }
 
-  const needsKeys = input.draft.exchange !== "paper"
-  const apiKey = needsKeys ? sealSecret(input.draft.apiKey, key) : null
-  const apiSecret = needsKeys ? sealSecret(input.draft.apiSecret, key) : null
-  const apiPassphrase = input.draft.exchange === "okx" ? sealSecret(input.draft.passphrase, key) : null
-  const exchange = input.draft.exchange
-  const mode = input.draft.mode
+  const needsKeys = draft.exchange !== "paper"
+  const apiKey = needsKeys ? sealSecret(draft.apiKey, key) : null
+  const apiSecret = needsKeys ? sealSecret(draft.apiSecret, key) : null
+  const apiPassphrase = draft.exchange === "okx" ? sealSecret(draft.passphrase, key) : null
+  const exchange = draft.exchange
+  const mode = draft.mode
 
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl || !exchange) return { ok: false, errors: { form: "Could not save your exchange." } }
@@ -164,7 +219,7 @@ export async function saveExchange(input: {
         api_secret,
         api_passphrase
       )
-      VALUES (${input.userId}, ${exchange}, ${mode}, ${apiKey}, ${apiSecret}, ${apiPassphrase})
+      VALUES (${userId}, ${exchange}, ${mode}, ${apiKey}, ${apiSecret}, ${apiPassphrase})
       ON CONFLICT (user_id)
       DO UPDATE SET
         exchange_name = EXCLUDED.exchange_name,
@@ -182,15 +237,13 @@ export async function saveExchange(input: {
   }
 }
 
-export async function saveRisk(input: {
-  userId: string | null
-  draft: RiskDraft
-}): Promise<{ ok: true } | { ok: false; errors: RiskErrors }> {
-  if (!input.userId) {
+export async function saveRisk(input: RiskDraft): Promise<{ ok: true } | { ok: false; errors: RiskErrors }> {
+  const userId = await readActorUserId()
+  if (!userId) {
     return { ok: false, errors: { form: "Save your account before setting risk limits." } }
   }
 
-  const draft = withDefaults(input.draft)
+  const draft = withDefaults(input)
   const errors = validateRisk(draft)
   if (Object.keys(errors).length > 0) return { ok: false, errors }
   if (!draft.strategy) return { ok: false, errors: { form: "Choose a strategy." } }
@@ -214,13 +267,13 @@ export async function saveRisk(input: {
         emergency_stop_volatility
       )
       VALUES (
-        ${input.userId},
-        ${input.draft.strategy},
+        ${userId},
+        ${draft.strategy},
         ${maxDrawdown},
         ${riskPerTrade},
-        ${input.draft.stopLoss},
-        ${input.draft.trailingTakeProfit},
-        ${input.draft.emergencyStop}
+        ${draft.stopLoss},
+        ${draft.trailingTakeProfit},
+        ${draft.emergencyStop}
       )
       ON CONFLICT (user_id)
       DO UPDATE SET
@@ -240,9 +293,8 @@ export async function saveRisk(input: {
   }
 }
 
-export async function launchTradelyt(
-  userId: string | null,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function launchTradelyt(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const userId = await readActorUserId()
   if (!userId) return { ok: false, error: "Save your account before launching." }
 
   const databaseUrl = process.env.DATABASE_URL
@@ -250,13 +302,15 @@ export async function launchTradelyt(
 
   try {
     const sql = neon(databaseUrl)
-    const updated = await sql`
-      UPDATE bot_settings
-      SET is_active = true, updated_at = now()
-      WHERE user_id = ${userId}
-      RETURNING id
+    const rows = await sql`
+      SELECT phone_number, telegram_username
+      FROM users
+      WHERE id = ${userId}
+      LIMIT 1
     `
-    if (!updated[0]?.id) return { ok: false, error: "Could not launch Tradelyt." }
+    const phone = typeof rows[0]?.phone_number === "string" ? rows[0].phone_number : ""
+    const telegram = typeof rows[0]?.telegram_username === "string" ? rows[0].telegram_username : ""
+    if (!phone || !telegram) return { ok: false, error: "Add your phone number and Telegram before checkout." }
     return { ok: true }
   } catch {
     return { ok: false, error: "Could not launch Tradelyt." }

@@ -4,7 +4,7 @@ Jedini izvor istine za Tradelyt. Svaki naredni chat, agent i linija koda polaze 
 
 Ako kod, kopija ili šema odstupaju od ovog dokumenta, dokument pobedjuje. Promena pravila ide prvo ovde, pa tek onda u kod. Ne izmišljati ponašanje koje ovde nije zapisano.
 
-Poslednje zaključavanje pravila: 2026-09-23. Partner landing copy dopunjen 2026-10-23 (poglavlje 3.4). Šema na Neon-u primenjena 2026-10-24 (poglavlje 18).
+Poslednje zaključavanje pravila: 2026-10-31. Partner landing copy dopunjen 2026-10-23 (poglavlje 3.4). Šema na Neon-u primenjena 2026-10-24, billing dopuna 2026-10-31 (poglavlje 18).
 
 ---
 
@@ -69,16 +69,16 @@ Jedan paket. Nema tierova.
 
 | Stavka | Vrednost |
 |---|---|
-| Cena | 30 USD mesečno |
+| Cena | 49 USD mesečno |
 | Period | isključivo mesečno |
-| Trial | 7 dana, bez kartice |
+| Trial | 7 dana, kartica obavezna unapred. Danas $0, 8. dana $49 |
 | Kripto naplata | V2, van V1 |
-| Provajder | Stripe Checkout |
-| Identitet naplate | jedan Telegram nalog = jedna pretplata = jedan Stripe Customer |
+| Provajder | Stripe Billing: Subscription + SetupIntent |
+| Identitet naplate | jedan nalog = jedna pretplata = jedan Stripe Customer |
 
-3D kartica na landingu je vizuelni modal. Ona otvara Stripe Checkout. Forma na našem domenu nikad ne prima broj kartice, CVC ni datum isteka.
+Checkout je ruta `/checkout`. Broj kartice, datum isteka i CVC unose se samo u Stripe Elements (`CardNumberElement`, `CardExpiryElement`, `CardCvcElement`). React state i naš DOM nikad ne drže te vrednosti. To drži integraciju u PCI SAQ A. Preview kartica na checkoutu pokazuje masku, brend (Visa, Mastercard, Amex) i ime vlasnika.
 
-Trial je naš sat, ne Stripe trial. Stripe pretplata počinje tek kad korisnik plati, odmah po 30 USD, bez Stripe trial perioda. `trial_ends_at` piše aplikacija u trenutku kad se Telegram nalog poveže.
+Trial je Stripe `trial_period_days: 7`, sa `payment_behavior: default_incomplete`, `save_default_payment_method: on_subscription` i `trial_settings.end_behavior.missing_payment_method: cancel`. Kartica se potvrđuje preko `confirmCardSetup` na `pending_setup_intent`. Ako kartica i dalje nedostaje kad trial istekne, Stripe otkazuje pretplatu. `subscriptions.trial_ends_at` dolazi iz Stripe `trial_end`.
 
 ### 3.4 Partner program (landing copy)
 
@@ -99,8 +99,8 @@ Zaključano za landing copy:
 ### V1 (prva produkcija)
 
 - Landing i dashboard na Next.js
-- Stripe Checkout, 30 USD mesečno
-- Trial 7 dana bez kartice
+- Stripe Billing, 49 USD mesečno, kartica unapred na `/checkout`
+- Trial 7 dana, $0 danas, redovna naplata od 8. dana
 - Telegram Login Widget ili magic link na imejl
 - Povezivanje bota deep linkom, rezervni jednokratni kod u dashboardu
 - Bybit read-only API
@@ -171,7 +171,7 @@ Oba procesa importuju `packages/db`. Migracije pokreće `drizzle-kit` protiv Neo
 | Frontend | Next.js 16 App Router, React 19, Tailwind CSS 4, Lucide |
 | ORM | Drizzle. Ne Prisma. Ne Kysely |
 | Baza | Neon serverless Postgres |
-| Naplata | Stripe Checkout + webhook |
+| Naplata | Stripe Billing + Elements + webhook |
 | Bot | Telegram Bot API, privatni chat |
 | Engine | Node.js + Express |
 | Berza V1 | Bybit read-only + Bybit public ticker |
@@ -207,7 +207,7 @@ Primarni put, odmah posle registracije ili plaćanja:
 2. U bazi stoji samo SHA-256 heš tokena, vreme isteka 30 minuta, `used_at` prazan.
 3. Korisnik otvara `https://t.me/TradelytBot?start=<token>`.
 4. `/start` sa validnim tokenom upisuje `telegram_id` i `telegram_first_name` na tog usera i označava token iskorišćenim.
-5. Od tog trenutka, ako pretplata još nije postojala, kreće trial: `subscription_status = trialing`, `trial_ends_at = now() + 7 days`.
+5. Povezivanje Telegrama ne pokreće trial. Trial kreće na `/checkout` kad Stripe potvrdi karticu: `subscription_status = trialing`, `trial_ends_at` iz Stripe `trial_end`.
 
 Rezervni put ako korisnik zatvori browser: dashboard pokaže kratak jednokratni kod. Korisnik pošalje botu `/start <kod>`. Isti heš, isti rok, isti efekat.
 
@@ -241,12 +241,16 @@ Podsetnik ide 24 sata pre `trial_ends_at` i 24 sata pre kraja plaćenog perioda 
 
 ### 7.2 Stripe webhookovi koji smeju da pišu u Neon
 
-- `checkout.session.completed` — upis `payment_customer_id`, status `active`, `subscription_ends_at` iz perioda
-- `customer.subscription.updated` — usklađivanje statusa i `subscription_ends_at`
-- `customer.subscription.deleted` — prelaz u `expired` kad period više ne pokriva korisnika
-- `invoice.payment_failed` — `past_due`
+Ruta je `POST /api/webhooks/stripe`. Telo se čita sirovo i potpis se proverava sa `STRIPE_WEBHOOK_SECRET`. Svaki događaj se prvo upisuje u `stripe_events` (`id` je Stripe event id). Ponovljena isporuka istog id-a se preskače. Ako obrada padne, red se briše da Stripe retry može da prođe.
 
-Webhook proverava Stripe potpis. Drugo plaćanje istog Telegram naloga ne pravi drugog Stripe customera. Checkout koristi postojeći `payment_customer_id`. Nova uspešna naplata produžava isti nalog, ne otvara drugi.
+- `customer.subscription.created` — upsert `subscriptions` i `users.subscription_status`
+- `customer.subscription.updated` — isto usklađivanje statusa, `trial_ends_at` i `current_period_end`
+- `customer.subscription.deleted` — status `canceled`, ili `expired` na korisniku kad period više ne pokriva
+- `invoice.payment_succeeded` — ponovo pročita pretplatu i uradi isti upsert
+- `invoice.payment_failed` — `past_due` na pretplati i na korisniku
+- `customer.subscription.trial_will_end` — isti upsert, plus jedan red u `notifications_log` (`system`). Slanje u Telegram i dalje radi engine
+
+`/api/create-subscription` upisuje pretplatu odmah po Stripe odgovoru. Webhook posle toga samo usklađuje. Drugi poziv za nalog koji već ima sačuvanu karticu i status `trialing` ili `active` ne pravi drugog Stripe customera ni drugu pretplatu.
 
 ### 7.3 Ko sme da šalje poruke
 
@@ -276,7 +280,7 @@ Svi primarni ključevi su UUID. Sva vremena u bazi su `timestamptz` u UTC. „Lo
 | `subscription_status` | text NOT NULL | enum iz poglavlja 7.1, default `expired` dok povezivanje ne krene trial |
 | `trial_ends_at` | timestamptz NULL | postavlja se jednom |
 | `subscription_ends_at` | timestamptz NULL | kraj plaćenog perioda |
-| `payment_customer_id` | text NULL UNIQUE | Stripe Customer ID |
+| `payment_customer_id` | text NULL UNIQUE | ciljno ime; živa kolona od 2026-10-31 je `stripe_customer_id` |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
@@ -451,6 +455,35 @@ Jedinstvenost epizode:
 - `max_drawdown`: jednom po korisniku po lokalnom danu
 
 Kazna se ne vraća ako korisnik kasnije popravi pravilo. Popravka samo gasi ponavljanje alarma.
+
+### 8.10 `subscriptions`
+
+Jedan red po korisniku. Živa tabela od migracije `0006_subscriptions.sql`.
+
+| Kolona | Tip | Pravilo |
+|---|---|---|
+| `id` | uuid PK | |
+| `user_id` | uuid UNIQUE FK users | ON DELETE CASCADE |
+| `stripe_customer_id` | text NOT NULL | |
+| `stripe_subscription_id` | text NOT NULL UNIQUE | |
+| `status` | text NOT NULL | `incomplete` \| `trialing` \| `active` \| `past_due` \| `canceled` \| `unpaid` \| `paused` \| `incomplete_expired` |
+| `price_id` | text NOT NULL | Stripe Price, Tradelyt Pro $49/mo |
+| `trial_ends_at` | timestamptz NULL | Stripe `trial_end` |
+| `current_period_end` | timestamptz NULL | sa subscription item-a |
+| `cancel_at_period_end` | boolean NOT NULL | default false |
+| `canceled_at` | timestamptz NULL | |
+| `created_at` | timestamptz NOT NULL | |
+| `updated_at` | timestamptz NOT NULL | aplikacija |
+
+### 8.11 `stripe_events`
+
+Idempotency Stripe webhooka. Primarni ključ je Stripe event id.
+
+| Kolona | Tip | Pravilo |
+|---|---|---|
+| `id` | text PK | Stripe `evt_...` |
+| `type` | text NOT NULL | |
+| `processed_at` | timestamptz NOT NULL | default `now()` |
 
 ---
 
@@ -761,6 +794,7 @@ Next.js:
 - `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_ID`
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `SESSION_SECRET` (HMAC za httpOnly cookie `tradelyt_uid`)
 - `ENGINE_URL`
 - `ENGINE_INTERNAL_SECRET`
 - `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` = `TradelytBot`
@@ -828,8 +862,8 @@ Sva 34 pitanja su zatvorena 2026-09-23. Skraćeni zapis da se ne otvaraju ponovo
 23. Javni WS plus privatni WS ili REST na 2s. Cilj detekcije ≤ 2s.
 24. Telegram je identitet. Login Widget ili magic link.
 25. UUID primarni ključevi. `telegram_id` UNIQUE.
-26. Stripe Checkout, 30 USD mesečno. Kripto je V2. Kartica se ne kuca u naš DOM.
-27. Trial 7 dana bez kartice. Podsetnik 24h ranije. Posle isteka bot ćuti, dashboard je read-only.
+26. Od 2026-10-31: Stripe Billing, 49 USD mesečno, Elements na `/checkout`. Sirovi broj kartice ne ulazi u naš DOM (SAQ A). Kripto je V2.
+27. Od 2026-10-31: trial 7 dana sa karticom unapred, $0 danas, $49 od 8. dana. Podsetnik i dalje 24h ranije. Posle isteka bot ćuti, dashboard je read-only.
 28. Statusi iz 7.1. Samo mesečni plan.
 29. Jedan Telegram, jedna pretplata, jedan Stripe customer.
 30. Manual preko `/trade` i preko dashboarda.
@@ -850,7 +884,9 @@ Sva 34 pitanja su zatvorena 2026-09-23. Skraćeni zapis da se ne otvaraju ponovo
 | Grana | `production`, `br-withered-mountain-b5kvvihr` |
 | Baza | `neondb`, šema `public`, PostgreSQL 18 |
 | Migracija | `00d939fb-e167-4bc0-92ae-0c58c99dc5ed` |
-| Tabele | `users`, `bot_settings`, `trades`, `daily_analytics`, `notifications_log` |
+| Tabele | `users`, `bot_settings`, `trades`, `daily_analytics`, `notifications_log`, `subscriptions`, `stripe_events` |
+| Billing migracija | `db/migrations/0006_subscriptions.sql`, 2026-10-31 |
+| Stripe Price | Tradelyt Pro, $49 USD mesečno, lookup key `tradelyt_pro_monthly` |
 
 Konvencije koje baza sada sprovodi:
 
@@ -859,7 +895,7 @@ Konvencije koje baza sada sprovodi:
 - Email: `citext`, UNIQUE, case-insensitive.
 - `country`: `char(2)`, ISO 3166-1 alpha-2, velika slova.
 - Cene i `pnl_amount`: `numeric(20,8)`. Procenti: `numeric(5,2)`. Drawdown i rizik po trejdu: 0–100.
-- `subscription_status`: `inactive` | `trial` | `active` | `past_due` | `canceled`. Default `inactive`.
+- `subscription_status`: `inactive` | `trial` | `trialing` | `active` | `past_due` | `canceled` | `expired`. Default `inactive`. `trialing` je Stripe trial. Stari `trial` ostaje u CHECK-u da stari redovi ostanu validni.
 - `discipline_mode`: `soft` | `strict` | `locked`. Default `soft`.
 - `exchange_name`: `binance` | `bybit`, ili NULL dok berza nije povezana.
 - `position_type`: `long` | `short`. `trades.status`: `open` | `closed` | `canceled` | `stopped`. Default `open`.
@@ -869,4 +905,6 @@ Konvencije koje baza sada sprovodi:
 - Brisanje korisnika kaskadno briše podešavanja, trejdove, analitiku i log. `notifications_log.trade_id` sme biti NULL; brisanje trejda ga postavlja na NULL.
 - `is_active` default `false`. Brojači i procenti default `0`. `discipline_score` je 0–100.
 
-Poglavlja 7–9 opisuju širi proizvodni cilj (posebna `exchange_keys` tabela, `trialing` / `expired`, modovi `scalper` / `classic` / `moonshot`, odvojeni IV i auth tag). Te tabele i vrednosti nisu u ovoj migraciji. Dok se dokument i šema ne usklade, kod koji dira bazu prati ovo poglavlje i `0001_init.sql`.
+Billing od 2026-10-31 prati `0006_subscriptions.sql`: `users.stripe_customer_id`, prošireni `subscription_status`, tabele `subscriptions` i `stripe_events`. Sesija checkouta je httpOnly cookie `tradelyt_uid` (HMAC, `SESSION_SECRET`), postavlja se kad se nalog sačuva.
+
+Poglavlja 7–9 i dalje opisuju širi proizvodni cilj koji nije sav u bazi (posebna `exchange_keys` tabela, modovi `scalper` / `classic` / `moonshot`, odvojeni IV i auth tag). Kod koji dira bazu prati ovo poglavlje i migracije `0001` do `0006`. `trialing` i `expired` jesu u živoj CHECK listi od `0006`.

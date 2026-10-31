@@ -43,7 +43,7 @@ function nameError(value: string, label: string) {
   return undefined
 }
 
-export function validateAccount(draft: AccountDraft): AccountErrors {
+export function validateAccount(draft: AccountDraft, options?: { keepPassword?: boolean }): AccountErrors {
   const errors: AccountErrors = {}
 
   const firstName = nameError(draft.firstName, "first name")
@@ -56,14 +56,16 @@ export function validateAccount(draft: AccountDraft): AccountErrors {
   }
 
   const password = draft.password
-  if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    errors.password = "Use at least 8 characters, with a letter and a number."
-  }
+  if (!options?.keepPassword) {
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      errors.password = "Use at least 8 characters, with a letter and a number."
+    }
 
-  if (draft.confirmPassword.length === 0) {
-    errors.confirmPassword = "Confirm your password."
-  } else if (draft.confirmPassword !== draft.password) {
-    errors.confirmPassword = "Passwords do not match."
+    if (draft.confirmPassword.length === 0) {
+      errors.confirmPassword = "Confirm your password."
+    } else if (draft.confirmPassword !== draft.password) {
+      errors.confirmPassword = "Passwords do not match."
+    }
   }
 
   const countrySelected = /^[A-Z]{2}$/.test(draft.country)

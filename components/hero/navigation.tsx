@@ -3,6 +3,9 @@
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 
+import { ProfileMenu } from "@/components/account/profile-menu"
+import type { SessionProfile } from "@/lib/profile"
+
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
   { href: "#pricing", label: "Pricing" },
@@ -10,10 +13,34 @@ const NAV_LINKS = [
   { href: "#docs", label: "Docs" },
 ] as const
 
-export function Navigation() {
+export function Navigation({ profile = null }: { profile?: SessionProfile | null }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [hidden, setHidden] = useState(false)
+  const [loaded, setLoaded] = useState<SessionProfile | null | undefined>(undefined)
+  const session = loaded === undefined ? profile : loaded
   const lastY = useRef(0)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/session", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: unknown) => {
+        if (cancelled || !payload || typeof payload !== "object" || !("profile" in payload)) return
+        const next = payload.profile
+        if (next === null) {
+          setLoaded(null)
+          return
+        }
+        if (!next || typeof next !== "object") return
+        const username = "username" in next && (typeof next.username === "string" || next.username === null) ? next.username : null
+        const avatarUrl = "avatarUrl" in next && (typeof next.avatarUrl === "string" || next.avatarUrl === null) ? next.avatarUrl : null
+        setLoaded({ username, avatarUrl })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const onScroll = () => {
@@ -35,7 +62,7 @@ export function Navigation() {
   }, [])
 
   return (
-    <nav className="fixed top-2 lg:top-4 left-1/2 -translate-x-1/2 z-50 w-[95%] lg:w-[92%] max-w-6xl">
+    <nav className="fixed top-2 lg:top-4 left-1/2 z-50 w-[95%] max-w-6xl -translate-x-1/2 lg:w-[92%]">
       <div
         className={`rounded-2xl bg-slate-900/90 backdrop-blur-xl border-[1.5px] border-emerald-500/60 shadow-[0_4px_16px_rgba(0,0,0,0.25),0_0_18px_rgba(16,185,129,0.22)] px-3 py-2 sm:px-4 sm:py-2.5 lg:px-6 lg:py-3.5 transition-all duration-300 ease-in-out ${
           hidden
@@ -72,10 +99,11 @@ export function Navigation() {
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             <Link
               href="/onboarding"
-              className="hidden sm:inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-2.5 py-1.5 sm:px-5 sm:py-2 rounded-xl text-[11px] sm:text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors whitespace-nowrap"
+              className="inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-2.5 py-1.5 sm:px-5 sm:py-2 rounded-xl text-[11px] sm:text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors whitespace-nowrap"
             >
               Launch App
             </Link>
+            {session ? <ProfileMenu profile={session} /> : null}
 
             <button
               type="button"
@@ -107,13 +135,6 @@ export function Navigation() {
                 {link.label}
               </a>
             ))}
-            <Link
-              href="/onboarding"
-              onClick={() => setIsMenuOpen(false)}
-              className="sm:hidden mt-2 mb-1 inline-flex w-full items-center justify-center bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-5 py-2 rounded-xl text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors"
-            >
-              Launch App
-            </Link>
           </div>
         )}
       </div>
