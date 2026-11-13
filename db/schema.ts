@@ -170,6 +170,7 @@ export const users = pgTable("users", {
 	telegramAvatarUrl: text("telegram_avatar_url"),
 	telegramPhotoFileId: text("telegram_photo_file_id"),
 	welcomeSentAt: timestamp("welcome_sent_at", { withTimezone: true }),
+	telegramBlockedAt: timestamp("telegram_blocked_at", { withTimezone: true }),
 }, (table) => [
 	unique("users_email_key").on(table.email),
 	unique("users_telegram_id_key").on(table.telegramId),
@@ -194,6 +195,7 @@ export const pendingSignups = pgTable("pending_signups", {
 	telegramAvatarUrl: text("telegram_avatar_url"),
 	telegramPhotoFileId: text("telegram_photo_file_id"),
 	welcomeSentAt: timestamp("welcome_sent_at", { withTimezone: true }),
+	telegramBlockedAt: timestamp("telegram_blocked_at", { withTimezone: true }),
 	telegramPrompted: boolean("telegram_prompted").default(false).notNull(),
 	notifyTradeExecutions: boolean("notify_trade_executions").default(true).notNull(),
 	notifyRiskWarnings: boolean("notify_risk_warnings").default(true).notNull(),

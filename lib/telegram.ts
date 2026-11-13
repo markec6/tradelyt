@@ -73,9 +73,16 @@ export type TelegramMessage = {
   text?: string
 }
 
+export type TelegramChatMember = {
+  chatId: string
+  chatType: string
+  status: string
+}
+
 export type TelegramUpdate = {
   updateId: string
   message?: TelegramMessage
+  myChatMember?: TelegramChatMember
 }
 
 export type ProfilePhoto =
@@ -137,6 +144,17 @@ export function parseUpdate(value: unknown): TelegramUpdate | null {
   const updateId = update ? safeId(update.update_id) : null
   if (!update || !updateId) return null
   const parsed: TelegramUpdate = { updateId }
+  const memberUpdate = asRecord(update.my_chat_member)
+  if (memberUpdate) {
+    const memberChat = asRecord(memberUpdate.chat)
+    const nextMember = asRecord(memberUpdate.new_chat_member)
+    const memberChatId = memberChat ? safeId(memberChat.id) : null
+    const memberChatType = memberChat && typeof memberChat.type === "string" ? memberChat.type : ""
+    const memberStatus = nextMember && typeof nextMember.status === "string" ? nextMember.status : ""
+    if (memberChatId && memberChatType === "private" && memberStatus) {
+      parsed.myChatMember = { chatId: memberChatId, chatType: memberChatType, status: memberStatus }
+    }
+  }
   const message = asRecord(update.message)
   if (!message) return parsed
   const chat = asRecord(message.chat)
@@ -165,7 +183,11 @@ export async function sendMessage(chatId: string, text: string): Promise<Telegra
     const response = await fetch(apiUrl("sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `Tradelyt\n${text}`,
+        disable_notification: false,
+      }),
     })
     if (response.ok) return { ok: true }
     let errorCode: number | null = null

@@ -50,7 +50,7 @@ const response = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, 
   body: JSON.stringify({
     url,
     secret_token: secret,
-    allowed_updates: ["message"],
+    allowed_updates: ["message", "my_chat_member"],
   }),
 })
 

@@ -97,7 +97,40 @@ async function reply(message: TelegramMessage, text: string) {
   logWebhook("sendMessage", { ok: false, errorCode: sent.errorCode, description: sent.description })
 }
 
+async function rememberBlock(chatId: string, blocked: boolean) {
+  const sql = database()
+  if (blocked) {
+    await sql`
+      UPDATE users
+      SET telegram_blocked_at = now(), updated_at = now()
+      WHERE telegram_id = ${chatId}::bigint
+    `
+    await sql`
+      UPDATE pending_signups
+      SET telegram_blocked_at = now(), updated_at = now()
+      WHERE telegram_id = ${chatId}::bigint
+    `
+    return
+  }
+  await sql`
+    UPDATE users
+    SET telegram_blocked_at = NULL, updated_at = now()
+    WHERE telegram_id = ${chatId}::bigint
+  `
+  await sql`
+    UPDATE pending_signups
+    SET telegram_blocked_at = NULL, updated_at = now()
+    WHERE telegram_id = ${chatId}::bigint
+  `
+}
+
 async function handleUpdate(update: TelegramUpdate) {
+  const member = update.myChatMember
+  if (member) {
+    if (member.status === "kicked") await rememberBlock(member.chatId, true)
+    else if (member.status === "member") await rememberBlock(member.chatId, false)
+    return
+  }
   const message = update.message
   console.log("telegram webhook received", {
     updateId: update.updateId,
