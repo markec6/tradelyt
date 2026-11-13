@@ -3,29 +3,63 @@ import { timingSafeEqual } from "node:crypto"
 export const TELEGRAM_AVATAR_PATH = "/api/telegram/avatar"
 export const TELEGRAM_BOT_USERNAME = "Tradelyt_bot"
 
-export type TelegramReplyMarkup = {
-  inline_keyboard: Array<Array<{ text: string; url: string }>>
-}
-
-export function returnToTradelytKeyboard(): TelegramReplyMarkup | null {
-  const webhook = process.env.TELEGRAM_WEBHOOK_URL
-  if (!webhook) return null
-  try {
-    const url = new URL(webhook)
-    if (url.protocol !== "https:") return null
-    return {
-      inline_keyboard: [[{ text: "🚀 Return to Tradelyt & Continue", url: `${url.origin}/onboarding` }]],
-    }
-  } catch {
-    return null
-  }
-}
-
 export function telegramDeepLink(token: string) {
   return `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${encodeURIComponent(token)}`
 }
 
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/
+
+export async function ensureTelegramWebhook(): Promise<{ ok: true } | { ok: false; reason: "unauthorized" | "webhook" }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET
+  const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL
+  if (!token || !secret || !webhookUrl || !SECRET_PATTERN.test(secret)) {
+    console.error("telegram webhook config")
+    return { ok: false, reason: "webhook" }
+  }
+  let target: URL
+  try {
+    target = new URL(webhookUrl)
+  } catch {
+    console.error("telegram webhook config")
+    return { ok: false, reason: "webhook" }
+  }
+  if (target.protocol !== "https:") {
+    console.error("telegram webhook config")
+    return { ok: false, reason: "webhook" }
+  }
+
+  const me = await fetch(apiUrl("getMe"))
+  const meBody = asRecord(await me.json().catch(() => null))
+  if (!me.ok || meBody?.ok !== true) {
+    console.error("telegram webhook unauthorized", me.status)
+    return { ok: false, reason: "unauthorized" }
+  }
+
+  const info = await fetch(apiUrl("getWebhookInfo"))
+  const infoBody = asRecord(await info.json().catch(() => null))
+  const current = infoBody?.ok === true ? asRecord(infoBody.result)?.url : ""
+  if (current === webhookUrl) return { ok: true }
+
+  const set = await fetch(apiUrl("setWebhook"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      url: webhookUrl,
+      secret_token: secret,
+      allowed_updates: ["message"],
+    }),
+  })
+  const setBody = asRecord(await set.json().catch(() => null))
+  if (!set.ok || setBody?.ok !== true) {
+    const errorCode = typeof setBody?.error_code === "number" ? setBody.error_code : set.status
+    const description = typeof setBody?.description === "string" ? setBody.description : ""
+    console.error("telegram webhook set failed", errorCode, description)
+    return { ok: false, reason: "webhook" }
+  }
+  console.log("telegram webhook registered", target.host, target.pathname)
+  return { ok: true }
+}
 
 export type TelegramUser = {
   id: string
@@ -126,16 +160,12 @@ export type TelegramSendResult =
   | { ok: true }
   | { ok: false; errorCode: number | null; description: string }
 
-export async function sendMessage(
-  chatId: string,
-  text: string,
-  replyMarkup?: TelegramReplyMarkup,
-): Promise<TelegramSendResult> {
+export async function sendMessage(chatId: string, text: string): Promise<TelegramSendResult> {
   try {
     const response = await fetch(apiUrl("sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(replyMarkup ? { chat_id: chatId, text, reply_markup: replyMarkup } : { chat_id: chatId, text }),
+      body: JSON.stringify({ chat_id: chatId, text }),
     })
     if (response.ok) return { ok: true }
     let errorCode: number | null = null

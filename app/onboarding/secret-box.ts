@@ -1,4 +1,4 @@
-import { createCipheriv, randomBytes } from "node:crypto"
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
 
 export function encryptionKey() {
   const raw = process.env.ENCRYPTION_KEY
@@ -18,4 +18,17 @@ export function sealSecret(plain: string, key: Buffer) {
   const ciphertext = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()])
   const tag = cipher.getAuthTag()
   return `${iv.toString("base64url")}:${tag.toString("base64url")}:${ciphertext.toString("base64url")}`
+}
+
+export function openSecret(sealed: string, key: Buffer) {
+  const [iv, tag, ciphertext] = sealed.split(":")
+  if (!iv || !tag || !ciphertext) return null
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"))
+    decipher.setAuthTag(Buffer.from(tag, "base64url"))
+    const plain = Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()])
+    return plain.toString("utf8")
+  } catch {
+    return null
+  }
 }

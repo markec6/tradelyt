@@ -62,7 +62,9 @@ const STEP_COPY = {
   },
 } as const
 
-function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 | 5 }) {
+type WizardStep = 1 | 2 | 3 | 4 | 5
+
+function StepIndicator({ step }: { step: WizardStep }) {
   return (
     <div>
       <p className="text-xs font-medium tracking-wide text-slate-400">Step {step} of 5</p>
@@ -84,7 +86,7 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 | 5 }) {
 export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }) {
   const reduced = useReducedMotion()
   const router = useRouter()
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(resume?.step ?? 1)
+  const [step, setStep] = useState<WizardStep>(resume?.step ?? 1)
   const [telegramPhase, setTelegramPhase] = useState<TelegramPhase>(resume?.telegramPhase ?? "form")
   const [draft, setDraft] = useState<AccountDraft>(resume?.account ?? EMPTY_ACCOUNT)
   const [telegram, setTelegram] = useState<TelegramDraft>(resume?.telegram ?? EMPTY_TELEGRAM)
@@ -178,7 +180,10 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
         setTelegramErrors(result.errors)
         return
       }
-      const response = await fetch("/api/telegram/status", { cache: "no-store" })
+      const response = await fetch("/api/telegram/status", {
+        cache: "no-store",
+        headers: { "ngrok-skip-browser-warning": "1" },
+      })
       if (response.status === 401) {
         setTelegramErrors({ form: "Save your account before connecting Telegram." })
         return
@@ -291,7 +296,7 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
       if (!result.ok) {
         setRiskErrors(result.errors)
         if (result.errors.maxDrawdown) document.getElementById("maxDrawdown")?.focus()
-        else if (result.errors.riskPerTrade) document.getElementById("riskPerTrade")?.focus()
+        else         if (result.errors.riskPerTrade) document.getElementById("riskPerTrade")?.focus()
         return
       }
       setStep(5)

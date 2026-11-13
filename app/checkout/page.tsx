@@ -3,7 +3,8 @@ import { redirect } from "next/navigation"
 
 import { CheckoutScreen } from "@/components/checkout/checkout-screen"
 import { checkoutMode } from "@/components/checkout/mode"
-import { readActorUserId, readUserIdFromCookies } from "@/lib/session-store"
+import { getPendingBilling } from "@/lib/pending-signup"
+import { readActorUserId, readPendingSignupId, readUserIdFromCookies } from "@/lib/session-store"
 import { cardConfirmed, getBillingAccount } from "@/lib/subscriptions"
 import { telegramReady } from "@/lib/telegram-ready"
 
@@ -20,6 +21,34 @@ export default async function CheckoutPage({
   const params = await searchParams
   const durableUserId = await readUserIdFromCookies()
   const userId = durableUserId ?? (await readActorUserId())
+  const pendingId = userId ? null : await readPendingSignupId()
+  if (!userId && !pendingId) redirect("/onboarding")
+
+  if (pendingId) {
+    const billing = await getPendingBilling(pendingId)
+    if (!billing?.telegramReady) redirect("/onboarding")
+    const ready = billing.cardSaved && (billing.stripeStatus === "trialing" || billing.stripeStatus === "active")
+    if (params.activation !== "failed" && params.activation !== "pending" && ready) {
+      redirect("/api/complete-signup")
+    }
+    const name = `${billing.firstName} ${billing.lastName}`.trim()
+    const activationError =
+      params.activation === "pending"
+        ? "Your trial is still confirming. Try again in a moment."
+        : params.activation === "failed"
+          ? "Finish your trial setup before opening the dashboard."
+          : ""
+    return (
+      <CheckoutScreen
+        publishableKey={process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ""}
+        defaultName={name}
+        activationError={activationError}
+        mode="trial"
+        commit="signup"
+      />
+    )
+  }
+
   if (!userId) redirect("/onboarding")
 
   const account = await getBillingAccount(userId)

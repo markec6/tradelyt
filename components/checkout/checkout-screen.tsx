@@ -48,10 +48,12 @@ function CheckoutLayout({
   defaultName,
   activationError,
   mode,
+  commit,
 }: {
   defaultName: string
   activationError: string
   mode: CheckoutMode
+  commit: "signup" | "account"
 }) {
   const stripe = useStripe()
   const elements = useElements()
@@ -79,7 +81,7 @@ function CheckoutLayout({
       : { idle: ui.cta, pending: ui.ctaPending, disclaimer: ui.disclaimer }
 
   async function openDashboard() {
-    const response = await fetch("/api/activate-session", { method: "POST" })
+    const response = await fetch(commit === "signup" ? "/api/complete-signup" : "/api/activate-session", { method: "POST" })
     if (!response.ok) {
       const payload: unknown = await response.json().catch(() => null)
       const code = payload && typeof payload === "object" && "code" in payload ? payload.code : undefined
@@ -196,11 +198,13 @@ export function CheckoutScreen({
   defaultName,
   activationError = "",
   mode = "trial",
+  commit = "account",
 }: {
   publishableKey: string
   defaultName: string
   activationError?: string
   mode?: CheckoutMode
+  commit?: "signup" | "account"
 }) {
   if (!publishableKey) {
     return (
@@ -226,7 +230,7 @@ export function CheckoutScreen({
       <div className="pointer-events-none fixed top-1/2 right-0 h-[400px] w-[400px] rounded-full bg-cyan-500/10 blur-[100px]" />
       <div className="relative min-h-screen lg:h-dvh">
         <Elements stripe={stripeClient(publishableKey)} options={{ appearance }}>
-          <CheckoutLayout defaultName={defaultName} activationError={activationError} mode={mode} />
+          <CheckoutLayout defaultName={defaultName} activationError={activationError} mode={mode} commit={commit} />
         </Elements>
       </div>
     </main>

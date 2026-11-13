@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto"
 
 import { sendAbandonedReminders } from "@/lib/abandoned-checkout"
+import { cancelStalePendingCheckouts, deleteExpiredPendingSignups } from "@/lib/pending-signup"
 import { retryPendingWelcomes } from "@/lib/welcome"
 
 export const dynamic = "force-dynamic"
@@ -23,5 +24,7 @@ export async function GET(request: Request) {
 
   const reminders = await sendAbandonedReminders()
   const welcomes = await retryPendingWelcomes()
-  return Response.json({ reminders, welcomes })
+  const canceled = await cancelStalePendingCheckouts()
+  const expired = await deleteExpiredPendingSignups()
+  return Response.json({ reminders, welcomes, canceled, expired })
 }

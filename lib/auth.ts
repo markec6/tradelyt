@@ -9,6 +9,7 @@ import {
   clearOnboardingCookie,
   clearSessionCookie,
   readOnboardingUserId,
+  readSignedUserId,
   readUserIdFromCookies,
   setOnboardingCookie,
   setSessionCookie,
@@ -124,14 +125,20 @@ export async function issueDurableSession(): Promise<
 }
 
 export async function logout() {
-  const userId = (await readUserIdFromCookies()) ?? (await readOnboardingUserId())
-  if (userId) {
-    await getDb()
-      .update(users)
-      .set({ sessionVersion: sql`${users.sessionVersion} + 1`, updatedAt: new Date() })
-      .where(eq(users.id, userId))
+  try {
+    const userId = await readSignedUserId()
+    if (userId) {
+      await getDb()
+        .update(users)
+        .set({ sessionVersion: sql`${users.sessionVersion} + 1`, updatedAt: new Date() })
+        .where(eq(users.id, userId))
+    }
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "failed"
+    console.error("logout", name)
+  } finally {
+    await clearAuthCookies()
   }
-  await clearAuthCookies()
 }
 
 export async function changePassword(userId: string, currentPassword: string, nextPassword: string) {

@@ -2,12 +2,14 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 
 export const SESSION_COOKIE = "tradelyt_uid"
 export const ONBOARDING_COOKIE = "tradelyt_onboarding"
+export const SIGNUP_COOKIE = "tradelyt_signup"
+export const SIGNUP_SECRET_COOKIE = "tradelyt_signup_secret"
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30
 export const ONBOARDING_MAX_AGE = 60 * 60 * 2
 
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export type SessionKind = "session" | "onboarding"
+export type SessionKind = "session" | "onboarding" | "signup"
 
 export type SessionClaims = {
   sub: string
@@ -17,15 +19,16 @@ export type SessionClaims = {
   kind: SessionKind
 }
 
-export function cookieOptions(maxAge: number) {
+export function cookieOptions(maxAge: number, secure = process.env.NODE_ENV === "production") {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge,
   }
 }
+
 
 function sessionSecret() {
   const secret = process.env.SESSION_SECRET
@@ -73,7 +76,7 @@ export function verifySession(token: string): SessionClaims | null {
   if (typeof claims.sub !== "string" || !USER_ID.test(claims.sub)) return null
   if (typeof claims.iat !== "number" || typeof claims.exp !== "number" || typeof claims.ver !== "number") return null
   if (!Number.isInteger(claims.ver) || claims.ver < 0) return null
-  if (claims.kind !== "session" && claims.kind !== "onboarding") return null
+  if (claims.kind !== "session" && claims.kind !== "onboarding" && claims.kind !== "signup") return null
   const now = Math.floor(Date.now() / 1000)
   if (claims.exp <= now || claims.iat > now + 60) return null
   return { sub: claims.sub, iat: claims.iat, exp: claims.exp, ver: claims.ver, kind: claims.kind }

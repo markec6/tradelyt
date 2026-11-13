@@ -106,7 +106,10 @@ export function TelegramVerify({
       if (stopped || inFlight) return
       inFlight = true
       try {
-        const response = await fetch("/api/telegram/status", { cache: "no-store" })
+        const response = await fetch("/api/telegram/status", {
+          cache: "no-store",
+          headers: { "ngrok-skip-browser-warning": "1" },
+        })
         if (stopped) return
         if (response.status === 401) {
           onAuthErrorRef.current()

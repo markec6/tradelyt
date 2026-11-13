@@ -1,22 +1,20 @@
 import { neon } from "@neondatabase/serverless"
 
+import { telegramHandleError } from "@/components/onboarding/validate-telegram"
 import { consumeLinkToken, hashLinkToken } from "@/lib/link-tokens"
 import {
   TELEGRAM_AVATAR_PATH,
   getUserProfilePhotos,
   parseUpdate,
-  returnToTradelytKeyboard,
   sendMessage,
   verifyTelegramSecret,
   type TelegramMessage,
-  type TelegramReplyMarkup,
   type TelegramUpdate,
 } from "@/lib/telegram"
 
 const START_FROM_SITE = "Start verification from the Tradelyt site."
 const TAKEN = "Ovaj Telegram nalog je već povezan sa drugim Tradelyt nalogom."
-const CONNECTED =
-  "🚀 Your Tradelyt account is successfully connected via Telegram! Click the button below to return to the platform and continue your setup."
+const CONNECTED = "🚀 Your Tradelyt account is successfully connected via Telegram!"
 const START = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s+(\S+))?\s*$/
 
 function database() {
@@ -48,69 +46,102 @@ async function releaseUpdate(updateId: string) {
   await database()`DELETE FROM telegram_updates WHERE update_id = ${updateId}`
 }
 
-async function syncAvatar(userId: string, telegramId: string) {
+async function syncAvatar(owner: "user" | "pending", ownerId: string, telegramId: string) {
   const photo = await getUserProfilePhotos(telegramId)
   if (!photo.ok) return
   const sql = database()
-  if (!photo.fileId) {
+  const fileId = photo.fileId || null
+  const avatarUrl = fileId ? TELEGRAM_AVATAR_PATH : null
+  if (owner === "pending") {
     await sql`
-      UPDATE users
-      SET telegram_photo_file_id = NULL, telegram_avatar_url = NULL, updated_at = now()
-      WHERE id = ${userId}::uuid
+      UPDATE pending_signups
+      SET
+        telegram_photo_file_id = ${fileId},
+        telegram_avatar_url = ${avatarUrl},
+        updated_at = now()
+      WHERE id = ${ownerId}::uuid
+        AND expires_at > now()
     `
     return
   }
   await sql`
     UPDATE users
     SET
-      telegram_photo_file_id = ${photo.fileId},
-      telegram_avatar_url = ${TELEGRAM_AVATAR_PATH},
+      telegram_photo_file_id = ${fileId},
+      telegram_avatar_url = ${avatarUrl},
       updated_at = now()
-    WHERE id = ${userId}::uuid
+    WHERE id = ${ownerId}::uuid
   `
 }
 
-function logWebhook(reason: string, errorCode?: number | null, description?: string) {
-  if (description) {
-    console.error("telegram webhook", reason, errorCode ?? "", description)
+function logWebhook(reason: string, detail?: Record<string, string | number | boolean | null>) {
+  if (detail) {
+    console.error("telegram webhook", reason, detail)
     return
   }
   console.error("telegram webhook", reason)
 }
 
-async function reply(message: TelegramMessage, text: string, replyMarkup?: TelegramReplyMarkup) {
-  const sent = await sendMessage(message.chat.id, text, replyMarkup)
-  if (!sent.ok) logWebhook("sendMessage", sent.errorCode, sent.description)
+function dbDetail(error: unknown) {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : ""
+  const message = error instanceof Error ? error.message.replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted]") : ""
+  return { code, message: message.slice(0, 300) }
+}
+
+async function reply(message: TelegramMessage, text: string) {
+  const sent = await sendMessage(message.chat.id, text)
+  if (sent.ok) {
+    console.log("telegram webhook sendMessage", { ok: true })
+    return
+  }
+  logWebhook("sendMessage", { ok: false, errorCode: sent.errorCode, description: sent.description })
 }
 
 async function handleUpdate(update: TelegramUpdate) {
   const message = update.message
+  console.log("telegram webhook received", {
+    updateId: update.updateId,
+    chatType: message?.chat.type ?? null,
+    hasText: Boolean(message?.text),
+  })
   if (!message || message.chat.type !== "private" || message.chat.id !== message.from.id) {
-    logWebhook("ignored")
+    logWebhook("ignored", { reason: "not-private" })
     return
   }
   const start = startPayload(message.text)
+  console.log("telegram webhook parsed", {
+    command: start.command,
+    payloadLength: start.command && start.payload ? start.payload.length : 0,
+  })
   if (!start.command) {
-    logWebhook("ignored")
+    logWebhook("ignored", { reason: "not-start" })
     return
   }
   if (!start.payload) {
     await reply(message, START_FROM_SITE)
     return
   }
+  const username = message.from.username && !telegramHandleError(message.from.username) ? message.from.username : null
   const result = await consumeLinkToken({
     tokenHash: hashLinkToken(start.payload),
     telegramId: message.from.id,
+    username,
   })
-  if ((result.status === "link" || result.status === "refresh") && result.userId) {
+  console.log("telegram webhook link", {
+    status: result.status,
+    wrote: result.wrote,
+    userFound: Boolean(result.userId),
+    owner: result.owner,
+  })
+  if ((result.status === "link" || result.status === "refresh") && result.userId && result.owner) {
     try {
-      await syncAvatar(result.userId, message.from.id)
+      await syncAvatar(result.owner, result.userId, message.from.id)
     } catch {
       // A missing photo does not undo the link.
     }
   }
   if (result.status === "link" || result.status === "refresh") {
-    await reply(message, CONNECTED, returnToTradelytKeyboard() ?? undefined)
+    await reply(message, CONNECTED)
   } else if (result.status === "taken") await reply(message, TAKEN)
   else if (result.status === "invalid" || result.status === "already_other") await reply(message, START_FROM_SITE)
 }
@@ -137,16 +168,19 @@ export async function POST(request: Request) {
   let claimed = false
   try {
     claimed = await claimUpdate(update.updateId)
-  } catch {
-    logWebhook("db")
+  } catch (error) {
+    logWebhook("db", dbDetail(error))
     return Response.json({ error: "Webhook handler failed." }, { status: 500 })
   }
-  if (!claimed) return Response.json({ ok: true })
+  if (!claimed) {
+    console.log("telegram webhook duplicate", { updateId: update.updateId })
+    return Response.json({ ok: true })
+  }
 
   try {
     await handleUpdate(update)
-  } catch {
-    logWebhook("db")
+  } catch (error) {
+    logWebhook("db", dbDetail(error))
     try {
       await releaseUpdate(update.updateId)
     } catch {

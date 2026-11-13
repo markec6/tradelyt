@@ -1,12 +1,12 @@
 import { neon } from "@neondatabase/serverless"
-import type Stripe from "stripe"
 
-import { telegramHandleError } from "@/components/onboarding/validate-telegram"
-import { cardIsSaved, getStripe } from "@/lib/stripe"
 import { sendMessage } from "@/lib/telegram"
 
 const WELCOME = (firstName: string) =>
   `Hello ${firstName}, your Tradelyt account is successfully connected and active! Welcome aboard.`
+
+const HYPE =
+  "Hyped to get this rolling with you! Consider me your personal risk manager — I'm here to keep your emotions in check and your discipline locked in so we stack wins for the long haul. Let's get it! 📈"
 
 function database() {
   const databaseUrl = process.env.DATABASE_URL
@@ -14,32 +14,14 @@ function database() {
   return neon(databaseUrl)
 }
 
-function readyUsername(value: unknown) {
-  const username = typeof value === "string" ? value.replace(/^@+/, "") : ""
-  return !telegramHandleError(username)
-}
-
-async function loadSubscription(subscriptionId: string) {
-  return getStripe().subscriptions.retrieve(subscriptionId, {
-    expand: ["pending_setup_intent"],
-  })
-}
-
-export async function maybeSendWelcome(userId: string, subscription?: Stripe.Subscription) {
+export async function maybeSendWelcome(userId: string) {
   try {
     const sql = database()
     const rows = await sql`
       SELECT
         first_name,
         telegram_id::text AS telegram_id,
-        telegram_username,
-        welcome_sent_at,
-        (
-          SELECT stripe_subscription_id
-          FROM subscriptions
-          WHERE user_id = users.id
-          LIMIT 1
-        ) AS stripe_subscription_id
+        welcome_sent_at
       FROM users
       WHERE id = ${userId}
       LIMIT 1
@@ -48,13 +30,21 @@ export async function maybeSendWelcome(userId: string, subscription?: Stripe.Sub
     if (!row || row.welcome_sent_at) return false
     const telegramId = typeof row.telegram_id === "string" ? row.telegram_id : ""
     const firstName = typeof row.first_name === "string" ? row.first_name.trim() : ""
-    if (!telegramId || !firstName || !readyUsername(row.telegram_username)) return false
+    if (!telegramId || !firstName) return false
 
-    const current = subscription ?? (typeof row.stripe_subscription_id === "string" ? await loadSubscription(row.stripe_subscription_id) : null)
-    if (!current) return false
-    if ((current.status !== "trialing" && current.status !== "active") || !cardIsSaved(current)) return false
+    const hello = await sendMessage(telegramId, WELCOME(firstName))
+    if (!hello.ok) {
+      console.error("telegram welcome", { step: "hello", errorCode: hello.errorCode, description: hello.description })
+      return false
+    }
 
-    const claimed = await sql`
+    const hype = await sendMessage(telegramId, HYPE)
+    if (!hype.ok) {
+      console.error("telegram welcome", { step: "hype", errorCode: hype.errorCode, description: hype.description })
+      return false
+    }
+
+    const saved = await sql`
       UPDATE users
       SET welcome_sent_at = now()
       WHERE id = ${userId}
@@ -62,25 +52,10 @@ export async function maybeSendWelcome(userId: string, subscription?: Stripe.Sub
         AND telegram_id IS NOT NULL
       RETURNING welcome_sent_at
     `
-    const claimedAt = claimed[0]?.welcome_sent_at
-    if (!claimedAt) return false
-
-    let delivered = false
-    try {
-      delivered = (await sendMessage(telegramId, WELCOME(firstName))).ok
-    } catch {
-      delivered = false
-    }
-    if (delivered) return true
-
-    await sql`
-      UPDATE users
-      SET welcome_sent_at = NULL
-      WHERE id = ${userId}
-        AND welcome_sent_at = ${claimedAt}
-    `
-    return false
-  } catch {
+    return Boolean(saved[0]?.welcome_sent_at)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ""
+    console.error("telegram welcome", { step: "failed", description: message.slice(0, 200) })
     return false
   }
 }
@@ -88,13 +63,13 @@ export async function maybeSendWelcome(userId: string, subscription?: Stripe.Sub
 export async function retryPendingWelcomes() {
   const sql = database()
   const rows = await sql`
-    SELECT users.id
+    SELECT id
     FROM users
-    JOIN subscriptions ON subscriptions.user_id = users.id
-    WHERE users.welcome_sent_at IS NULL
-      AND users.telegram_id IS NOT NULL
-      AND subscriptions.status IN ('trialing', 'active')
-    ORDER BY subscriptions.updated_at
+    WHERE welcome_sent_at IS NULL
+      AND telegram_id IS NOT NULL
+      AND first_name IS NOT NULL
+      AND btrim(first_name) <> ''
+    ORDER BY updated_at
     LIMIT 20
   `
   let sent = 0

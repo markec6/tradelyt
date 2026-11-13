@@ -67,12 +67,49 @@ export async function loadOnboardingResume(userId: string): Promise<OnboardingRe
   `
   const row = rows[0]
   if (!row) return null
+  return resumeFromRow(row, text(row.bot_user_id).length > 0)
+}
 
+export async function loadPendingResume(pendingId: string): Promise<OnboardingResume | null> {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) return null
+  const sql = neon(databaseUrl)
+  const rows = await sql`
+    SELECT
+      first_name,
+      last_name,
+      email::text AS email,
+      phone_number,
+      country,
+      telegram_username,
+      telegram_id::text AS telegram_id,
+      telegram_prompted,
+      notify_trade_executions,
+      notify_risk_warnings,
+      notify_daily_pnl,
+      exchange_name,
+      trading_mode,
+      strategy,
+      max_drawdown_percent,
+      risk_per_trade_percent,
+      stop_loss_enabled,
+      trailing_take_profit,
+      emergency_stop_volatility
+    FROM pending_signups
+    WHERE id = ${pendingId}
+      AND expires_at > now()
+    LIMIT 1
+  `
+  const row = rows[0]
+  if (!row) return null
+  return resumeFromRow(row, Boolean(row.telegram_prompted))
+}
+
+function resumeFromRow(row: Record<string, unknown>, prompted: boolean): OnboardingResume {
   const country = text(row.country)
   const phone = text(row.phone_number)
   const telegram = text(row.telegram_username).replace(/^@+/, "")
   const linked = text(row.telegram_id).length > 0
-  const hasBot = text(row.bot_user_id).length > 0
   const usernameOk = !telegramHandleError(telegram)
   const exchange = asExchange(text(row.exchange_name))
   const strategy = asStrategy(text(row.strategy))
@@ -83,7 +120,7 @@ export async function loadOnboardingResume(userId: string): Promise<OnboardingRe
   else if (!linked || !usernameOk) {
     step = 2
     if (linked) telegramPhase = "needs-username"
-    else if (hasBot) telegramPhase = "wait"
+    else if (prompted) telegramPhase = "wait"
   } else if (!exchange) step = 3
   else if (!strategy) step = 4
 

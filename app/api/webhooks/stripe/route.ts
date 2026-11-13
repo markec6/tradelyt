@@ -1,5 +1,6 @@
 import type Stripe from "stripe"
 
+import { findPendingIdByCustomer, recordPendingStripe } from "@/lib/pending-signup"
 import { getStripe } from "@/lib/stripe"
 import {
   claimStripeEvent,
@@ -28,9 +29,14 @@ async function userIdForSubscription(subscription: Stripe.Subscription) {
 
 async function syncSubscription(subscription: Stripe.Subscription) {
   const userId = await userIdForSubscription(subscription)
-  if (!userId) return
-  await upsertSubscriptionFromStripe(userId, subscription)
-  return userId
+  if (userId) {
+    await upsertSubscriptionFromStripe(userId, subscription)
+    return userId
+  }
+  const customerId = customerIdOf(subscription.customer) ?? ""
+  const pendingId = subscription.metadata.pending_signup_id || (await findPendingIdByCustomer(customerId))
+  if (pendingId) await recordPendingStripe(pendingId, subscription)
+  return null
 }
 
 async function handleEvent(event: Stripe.Event) {
@@ -59,15 +65,19 @@ async function handleEvent(event: Stripe.Event) {
       const intent = event.data.object
       const customerId = customerIdOf(intent.customer)
       if (!customerId) return
-      const userId = await findUserIdByCustomer(customerId)
-      if (!userId) return
       const listed = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 5 })
       const match =
         listed.data.find((item) => item.status === "trialing" || item.status === "active" || item.status === "incomplete") ??
         listed.data[0]
       if (!match) return
       const subscription = await stripe.subscriptions.retrieve(match.id, { expand: ["pending_setup_intent"] })
-      await upsertSubscriptionFromStripe(userId, subscription)
+      const userId = await findUserIdByCustomer(customerId)
+      if (userId) {
+        await upsertSubscriptionFromStripe(userId, subscription)
+        return
+      }
+      const pendingId = subscription.metadata.pending_signup_id || (await findPendingIdByCustomer(customerId))
+      if (pendingId) await recordPendingStripe(pendingId, subscription)
       return
     }
     case "invoice.payment_failed": {

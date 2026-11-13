@@ -4,9 +4,7 @@ import { telegramHandleError } from "@/components/onboarding/validate-telegram"
 import { cardIsSaved, getStripe } from "@/lib/stripe"
 import { upsertSubscriptionFromStripe } from "@/lib/subscriptions"
 import { sendMessage } from "@/lib/telegram"
-
-const REMINDER = (firstName: string) =>
-  `Hello ${firstName}, your Tradelyt trial is waiting on a saved card. Open Tradelyt and add a payment method to unlock the platform.`
+import { CARD_REMINDERS, pickVariant } from "@/lib/telegram-messages"
 
 function database() {
   const databaseUrl = process.env.DATABASE_URL
@@ -74,7 +72,7 @@ export async function sendAbandonedReminders() {
 
     let delivered = false
     try {
-      delivered = (await sendMessage(telegramId, REMINDER(firstName))).ok
+      delivered = (await sendMessage(telegramId, pickVariant(CARD_REMINDERS)(firstName))).ok
     } catch {
       delivered = false
     }

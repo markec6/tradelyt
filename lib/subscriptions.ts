@@ -234,7 +234,7 @@ export async function upsertSubscriptionFromStripe(userId: string, subscription:
   }
   await sql.transaction(statements)
   if ((status === "trialing" || status === "active") && cardIsSaved(subscription)) {
-    await maybeSendWelcome(userId, subscription)
+    await maybeSendWelcome(userId)
   }
   return { status, trialEndsAt, currentPeriodEnd: periodEnd }
 }

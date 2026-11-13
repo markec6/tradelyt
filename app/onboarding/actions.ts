@@ -9,13 +9,27 @@ import { validateAccount, type AccountDraft, type AccountErrors } from "@/compon
 import { validateExchange, type ExchangeDraft, type ExchangeErrors } from "@/components/onboarding/validate-exchange"
 import { validateRisk, withDefaults, type RiskDraft, type RiskErrors } from "@/components/onboarding/validate-risk"
 import { telegramHandleError, type TelegramDraft } from "@/components/onboarding/validate-telegram"
-import { issueLinkToken } from "@/lib/link-tokens"
-import { telegramDeepLink } from "@/lib/telegram"
+import { issueLinkToken, issuePendingLinkToken } from "@/lib/link-tokens"
+import { ensureTelegramWebhook, telegramDeepLink } from "@/lib/telegram"
 import { getDb } from "@/db"
 import { users } from "@/db/schema"
+import {
+  deleteUnpaidPending,
+  pendingCardSaved,
+  pendingReadyForCheckout,
+  releaseExpiredContacts,
+  savePendingExchange,
+  savePendingRisk,
+  savePendingTelegram,
+  signupMaxAge,
+  takenByPending,
+  takenByUsers,
+  upsertPendingAccount,
+} from "@/lib/pending-signup"
 import { cardConnected } from "@/lib/subscriptions"
 import { hashPassword } from "@/lib/password"
-import { readActorUserId, setOnboardingCookie } from "@/lib/session-store"
+import { readActorUserId, readPendingSignupId, setOnboardingCookie, setSignupCookie } from "@/lib/session-store"
+import { readSignupPassword, setSignupPassword } from "@/lib/signup-secret"
 import { telegramReady } from "@/lib/telegram-ready"
 
 const EMAIL_TAKEN = "An account with this email already exists."
@@ -51,6 +65,7 @@ export async function saveAccount(
   draft: AccountDraft,
 ): Promise<{ ok: true; userId: string; phoneNumber: string } | { ok: false; errors: AccountErrors }> {
   const actorId = await readActorUserId()
+  if (!actorId) return savePendingAccount(draft)
   const keepPassword = Boolean(actorId) && draft.password.length === 0 && draft.confirmPassword.length === 0
   const errors = validateAccount(draft, { keepPassword })
   if (Object.keys(errors).length > 0) return { ok: false, errors }
@@ -123,12 +138,75 @@ export async function saveAccount(
   }
 }
 
+async function savePendingAccount(
+  draft: AccountDraft,
+): Promise<{ ok: true; userId: string; phoneNumber: string } | { ok: false; errors: AccountErrors }> {
+  const pendingId = await readPendingSignupId()
+  const keepPassword = Boolean(pendingId) && draft.password.length === 0 && draft.confirmPassword.length === 0
+  const errors = validateAccount(draft, { keepPassword })
+  if (Object.keys(errors).length > 0) return { ok: false, errors }
+  if (keepPassword && !(await readSignupPassword())) {
+    return { ok: false, errors: { password: "Use at least 8 characters, with a letter and a number." } }
+  }
+
+  const phoneNumber = toE164(draft.phoneNumber, draft.country)
+  if (!phoneNumber) return { ok: false, errors: { phoneNumber: "Enter a valid phone number." } }
+
+  const email = draft.email.trim()
+  const profile = {
+    id: pendingId,
+    email,
+    firstName: draft.firstName.trim(),
+    lastName: draft.lastName.trim(),
+    phoneNumber,
+    country: draft.country,
+  }
+
+  try {
+    if (pendingId && (await pendingCardSaved(pendingId))) {
+      return { ok: false, errors: { email: "Your trial is already confirmed." } }
+    }
+    await releaseExpiredContacts(email, phoneNumber)
+    const usersTaken = await takenByUsers(email, phoneNumber)
+    if (usersTaken.email) return { ok: false, errors: { email: EMAIL_TAKEN } }
+    if (usersTaken.phone) return { ok: false, errors: { phoneNumber: PHONE_TAKEN } }
+    const pendingTaken = await takenByPending(email, phoneNumber, pendingId)
+    if (pendingTaken.email) return { ok: false, errors: { email: EMAIL_TAKEN } }
+    if (pendingTaken.phone) return { ok: false, errors: { phoneNumber: PHONE_TAKEN } }
+
+    const saved = await upsertPendingAccount(profile)
+    if (!saved) return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
+    const maxAge = signupMaxAge(saved.expiresAt)
+    if (!maxAge) return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
+    if (!keepPassword) {
+      const sealed = await setSignupPassword(draft.password, maxAge)
+      if (!sealed) {
+        if (!pendingId) await deleteUnpaidPending(saved.id)
+        return { ok: false, errors: { password: "Could not save your password." } }
+      }
+    }
+    await setSignupCookie(saved.id, maxAge)
+    return { ok: true, userId: saved.id, phoneNumber }
+  } catch (error) {
+    rethrowConfig(error)
+    const constraint = constraintName(error)
+    if (constraint.includes("email")) return { ok: false, errors: { email: EMAIL_TAKEN } }
+    if (constraint.includes("phone")) return { ok: false, errors: { phoneNumber: PHONE_TAKEN } }
+    return { ok: false, errors: { phoneNumber: "Could not save your phone number." } }
+  }
+}
+
 export async function saveTelegram(
   draft: TelegramDraft,
 ): Promise<{ ok: true } | { ok: false; errors: { handle?: string; form?: string } }> {
   const userId = await readActorUserId()
   if (!userId) {
-    return { ok: false, errors: { form: "Save your account before connecting Telegram." } }
+    const pendingId = await readPendingSignupId()
+    if (!pendingId) return { ok: false, errors: { form: "Save your account before connecting Telegram." } }
+    if (await pendingCardSaved(pendingId)) return { ok: false, errors: { form: "Your trial is already confirmed." } }
+    const saved = await savePendingTelegram(pendingId, draft)
+    if (!saved) return { ok: false, errors: { form: "Could not save Telegram." } }
+    return { ok: true }
   }
 
   if (await cardConnected(userId)) {
@@ -176,12 +254,31 @@ export async function issueTelegramLink(): Promise<
   { ok: true; url: string; expiresAt: string } | { ok: false; error: string }
 > {
   const userId = await readActorUserId()
-  if (!userId) return { ok: false, error: "Save your account before connecting Telegram." }
-  if (await cardConnected(userId)) return { ok: false, error: "Your trial is already confirmed." }
+  const pendingId = userId ? null : await readPendingSignupId()
+  if (!userId && !pendingId) return { ok: false, error: "Save your account before connecting Telegram." }
+  if (userId && (await cardConnected(userId))) return { ok: false, error: "Your trial is already confirmed." }
+  if (pendingId && (await pendingCardSaved(pendingId))) return { ok: false, error: "Your trial is already confirmed." }
+  const webhook = await ensureTelegramWebhook()
+  if (!webhook.ok) {
+    return {
+      ok: false,
+      error:
+        webhook.reason === "unauthorized"
+          ? "Telegram rejected the bot token."
+          : "Could not register the Telegram webhook.",
+    }
+  }
   try {
+    if (!userId) {
+      if (!pendingId) return { ok: false, error: "Save your account before connecting Telegram." }
+      const issued = await issuePendingLinkToken(pendingId)
+      return { ok: true, url: telegramDeepLink(issued.token), expiresAt: issued.expiresAt }
+    }
     const issued = await issueLinkToken(userId)
     return { ok: true, url: telegramDeepLink(issued.token), expiresAt: issued.expiresAt }
-  } catch {
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : ""
+    console.error("telegram link", code || "failed")
     return { ok: false, error: "Could not open Telegram." }
   }
 }
@@ -190,10 +287,6 @@ export async function saveExchange(
   draft: ExchangeDraft,
 ): Promise<{ ok: true } | { ok: false; errors: ExchangeErrors }> {
   const userId = await readActorUserId()
-  if (!userId) {
-    return { ok: false, errors: { form: "Save your account before connecting an exchange." } }
-  }
-
   const errors = validateExchange(draft)
   if (Object.keys(errors).length > 0) return { ok: false, errors }
 
@@ -206,9 +299,25 @@ export async function saveExchange(
   const apiPassphrase = draft.exchange === "okx" ? sealSecret(draft.passphrase, key) : null
   const exchange = draft.exchange
   const mode = draft.mode
+  if (!exchange) return { ok: false, errors: { form: "Could not save your exchange." } }
+
+  if (!userId) {
+    const pendingId = await readPendingSignupId()
+    if (!pendingId) return { ok: false, errors: { form: "Save your account before connecting an exchange." } }
+    if (await pendingCardSaved(pendingId)) return { ok: false, errors: { form: "Your trial is already confirmed." } }
+    const saved = await savePendingExchange(pendingId, {
+      name: exchange,
+      mode,
+      apiKey,
+      apiSecret,
+      apiPassphrase,
+    })
+    if (!saved) return { ok: false, errors: { form: "Could not save your exchange." } }
+    return { ok: true }
+  }
 
   const databaseUrl = process.env.DATABASE_URL
-  if (!databaseUrl || !exchange) return { ok: false, errors: { form: "Could not save your exchange." } }
+  if (!databaseUrl) return { ok: false, errors: { form: "Could not save your exchange." } }
 
   try {
     const sql = neon(databaseUrl)
@@ -242,7 +351,16 @@ export async function saveExchange(
 export async function saveRisk(input: RiskDraft): Promise<{ ok: true } | { ok: false; errors: RiskErrors }> {
   const userId = await readActorUserId()
   if (!userId) {
-    return { ok: false, errors: { form: "Save your account before setting risk limits." } }
+    const pendingId = await readPendingSignupId()
+    if (!pendingId) return { ok: false, errors: { form: "Save your account before setting risk limits." } }
+    const draft = withDefaults(input)
+    const errors = validateRisk(draft)
+    if (Object.keys(errors).length > 0) return { ok: false, errors }
+    if (!draft.strategy) return { ok: false, errors: { form: "Choose a strategy." } }
+    if (await pendingCardSaved(pendingId)) return { ok: false, errors: { form: "Your trial is already confirmed." } }
+    const saved = await savePendingRisk(pendingId, { ...draft, strategy: draft.strategy })
+    if (!saved) return { ok: false, errors: { form: "Could not save your risk limits." } }
+    return { ok: true }
   }
 
   const draft = withDefaults(input)
@@ -297,7 +415,11 @@ export async function saveRisk(input: RiskDraft): Promise<{ ok: true } | { ok: f
 
 export async function launchTradelyt(): Promise<{ ok: true } | { ok: false; error: string }> {
   const userId = await readActorUserId()
-  if (!userId) return { ok: false, error: "Save your account before launching." }
+  if (!userId) {
+    const pendingId = await readPendingSignupId()
+    if (!pendingId) return { ok: false, error: "Save your account before launching." }
+    return pendingReadyForCheckout(pendingId)
+  }
 
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) return { ok: false, error: "Could not launch Tradelyt." }

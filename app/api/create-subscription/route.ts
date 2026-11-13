@@ -1,6 +1,7 @@
 import Stripe from "stripe"
 
-import { readActorUserId } from "@/lib/session-store"
+import { startPendingCheckout } from "@/lib/pending-checkout"
+import { readActorUserId, readPendingSignupId } from "@/lib/session-store"
 import { cardIsSaved, getPriceId, getStripe, setupClientSecret } from "@/lib/stripe"
 import { getBillingAccount, upsertSubscriptionFromStripe, type BillingAccount } from "@/lib/subscriptions"
 import { telegramReady } from "@/lib/telegram-ready"
@@ -46,7 +47,11 @@ async function reuseOpenSubscription(account: BillingAccount) {
 
 export async function POST(request: Request) {
   const userId = await readActorUserId()
-  if (!userId) return jsonError("Save your account before starting the trial.", 401)
+  if (!userId) {
+    const pendingId = await readPendingSignupId()
+    if (!pendingId) return jsonError("Save your account before starting the trial.", 401)
+    return startPendingCheckout(pendingId, request)
+  }
   if (!(await telegramReady(userId))) return jsonError("Connect Telegram before checkout.", 403, "telegram_required")
 
   const databaseUrl = process.env.DATABASE_URL
