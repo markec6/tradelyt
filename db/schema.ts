@@ -135,6 +135,9 @@ export const subscriptions = pgTable("subscriptions", {
 	canceledAt: timestamp("canceled_at", { withTimezone: true }),
 	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	reminder1hSentAt: timestamp("reminder_1h_sent_at", { withTimezone: true }),
+	reminder1hAttempts: integer("reminder_1h_attempts").default(0).notNull(),
+	reminder1hClaimedAt: timestamp("reminder_1h_claimed_at", { withTimezone: true }),
 }, (table) => [
 	index("subscriptions_stripe_customer_id_idx").using("btree", table.stripeCustomerId.asc().nullsLast().op("text_ops")),
 	foreignKey({
@@ -145,6 +148,7 @@ export const subscriptions = pgTable("subscriptions", {
 	unique("subscriptions_user_id_key").on(table.userId),
 	unique("subscriptions_stripe_subscription_id_key").on(table.stripeSubscriptionId),
 	check("subscriptions_status_check", sql`status = ANY (ARRAY['incomplete'::text, 'trialing'::text, 'active'::text, 'past_due'::text, 'canceled'::text, 'unpaid'::text, 'paused'::text, 'incomplete_expired'::text])`),
+	check("subscriptions_reminder_1h_attempts_check", sql`(reminder_1h_attempts >= 0) AND (reminder_1h_attempts <= 3)`),
 ]);
 
 export const users = pgTable("users", {
@@ -156,13 +160,16 @@ export const users = pgTable("users", {
 	phoneNumber: text("phone_number"),
 	country: char({ length: 2 }),
 	dateOfBirth: date("date_of_birth"),
-	telegramId: bigint("telegram_id", { mode: "number" }),
+	telegramId: bigint("telegram_id", { mode: "bigint" }),
 	telegramUsername: text("telegram_username"),
+	telegramFirstName: text("telegram_first_name"),
 	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 	accountStatus: text("account_status").default('pending').notNull(),
 	sessionVersion: integer("session_version").default(0).notNull(),
 	telegramAvatarUrl: text("telegram_avatar_url"),
+	telegramPhotoFileId: text("telegram_photo_file_id"),
+	welcomeSentAt: timestamp("welcome_sent_at", { withTimezone: true }),
 }, (table) => [
 	unique("users_email_key").on(table.email),
 	unique("users_telegram_id_key").on(table.telegramId),
@@ -172,6 +179,28 @@ export const users = pgTable("users", {
 	check("users_session_version_check", sql`session_version >= 0`),
 	check("users_active_contact_check", sql`(account_status <> 'active'::text) OR ((phone_number IS NOT NULL) AND (telegram_username IS NOT NULL))`),
 ]);
+
+export const linkTokens = pgTable("link_tokens", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
+	tokenHash: text("token_hash").notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+	usedAt: timestamp("used_at", { withTimezone: true }),
+	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+	index("link_tokens_user_id_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [users.id],
+		name: "link_tokens_user_id_fkey",
+	}).onDelete("cascade"),
+	unique("link_tokens_token_hash_key").on(table.tokenHash),
+]);
+
+export const telegramUpdates = pgTable("telegram_updates", {
+	updateId: text("update_id").primaryKey().notNull(),
+	receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const stripeEvents = pgTable("stripe_events", {
 	id: text().primaryKey().notNull(),

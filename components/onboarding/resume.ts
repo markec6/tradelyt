@@ -5,8 +5,11 @@ import type { TelegramDraft } from "./validate-telegram"
 
 export type OnboardingStep = 1 | 2 | 3 | 4 | 5
 
+export type TelegramPhase = "form" | "wait" | "needs-username" | "expired"
+
 export type OnboardingResume = {
   step: OnboardingStep
+  telegramPhase: TelegramPhase
   account: AccountDraft
   telegram: TelegramDraft
   exchange: ExchangeDraft

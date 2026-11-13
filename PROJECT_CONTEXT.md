@@ -201,15 +201,20 @@ Imejl se čuva samo ako je korisnik ušao magic linkom ili ga je uneo. Nije obav
 
 ### 6.1 Povezivanje bota
 
-Primarni put, odmah posle registracije ili plaćanja:
+Primarni put je korak 2 onboarding wizarda, odmah posle naloga. Token izdaje `issueTelegramLink`, koje zove `issueLinkToken`.
 
-1. Aplikacija napravi jednokratni `link_token` (32 bajta, URL-safe).
-2. U bazi stoji samo SHA-256 heš tokena, vreme isteka 30 minuta, `used_at` prazan.
-3. Korisnik otvara `https://t.me/TradelytBot?start=<token>`.
-4. `/start` sa validnim tokenom upisuje `telegram_id` i `telegram_first_name` na tog usera i označava token iskorišćenim.
-5. Povezivanje Telegrama ne pokreće trial. Trial kreće na `/checkout` kad Stripe potvrdi karticu: `subscription_status = trialing`, `trial_ends_at` iz Stripe `trial_end`.
+1. Aplikacija napravi jednokratni token od 32 bajta, base64url. Novi token briše starije neiskorišćene tokene tog korisnika.
+2. U `link_tokens` stoji samo SHA-256 heks heš, `expires_at` za 30 minuta, `used_at` prazan. `user_id` je `ON DELETE CASCADE`.
+3. Na koraku 2 korisnik prvo sačuva prekidače obaveštenja. Zatim „Open Telegram and verify“ otvara `https://t.me/Tradelyt_bot?start=<token>` u novom tabu. Sirovi token se ne ispisuje. Ekran pita `GET /api/telegram/status` na 1 sekundu i još jednom čim se tab vrati u fokus. Jedan token važi dok ne istekne ili dok korisnik ne traži novi. Čim postoje `telegram_id` i važeći username, wizard odmah prelazi na berzu. Ako Telegram nalog nema username, ekran ostaje i traži novi link.
+4. Telegram zove `POST /api/webhooks/telegram` na Next.js aplikaciji. Tajna je zaglavlje `X-Telegram-Bot-Api-Secret-Token`. Ruta prima `message` update samo iz privatnog chata u kome je `chat.id` jednak `from.id`. Ponovljeni `update_id` staje u `telegram_updates`.
+5. Važeći token upisuje `users.telegram_id` (bigint, u aplikaciji string) i `telegram_first_name`. `telegram_username` postaje `from.username` bez `@` kada Telegram pošalje username. Token dobija `used_at`. Isti `telegram_id` na ponovnom `/start` osveži ime i username i ponovo dobija poruku o vezi. Ako nalog već ima drugi `telegram_id`, veza se ne menja. Ako je taj `telegram_id` već na drugom redu, prvi nalog ostaje.
+6. Posle prve veze i posle osvežavanja istog naloga bot šalje „🚀 Your Tradelyt account is successfully connected via Telegram! Click the button below to return to the platform and continue your setup.“ uz url dugme „🚀 Return to Tradelyt & Continue“ ka `https://refinery-quarters-bonsai.ngrok-free.dev/onboarding`. Ako to slanje padne, veza ostaje i webhook vraća 200. Nevažeći, istekao ili već iskorišćen start, i nalog koji je već vezan na drugi Telegram, dobijaju „Molimo vas pokrenite verifikaciju sa našeg sajta.“ Zauzet Telegram dobija „Ovaj Telegram nalog je već povezan sa drugim Tradelyt nalogom.“ Te poruke nemaju dugme.
+7. Profilna slika: webhook čuva `telegram_photo_file_id` i postavlja `telegram_avatar_url` na `/api/telegram/avatar`. Ta ruta strimuje fajl. Token bota ne izlazi u browser.
+8. Povezivanje Telegrama ne pokreće trial. Trial kreće na `/checkout` kad Stripe potvrdi karticu. `/checkout`, `launchTradelyt`, `POST /api/create-subscription` i `POST /api/pay-invoice` traže `telegram_id` i username koji prolazi isti regex. Stranica bez toga vraća na `/onboarding`. API vraća 403 `telegram_required`. Nalog koji je već potvrdio karticu i ima sesiju i dalje ulazi u dashboard.
+9. Dobrodošlica ide tačno jednom, na engleskom, sa `users.first_name`, kad je pretplata `trialing` ili `active` i kartica sačuvana, a `telegram_id` upisan. `users.welcome_sent_at` se zauzme pre slanja. Ako `sendMessage` padne, timestamp se vraća na NULL. Ne čeka se `bot_settings.is_active`. Poruka „Your Tradelyt account is connected.“ ostaje odvojena, odmah na prvoj vezi.
+10. Incomplete pretplata starija od jednog sata, sa `telegram_id` i važećim username-om, dobija jedan podsetnik. `GET /api/cron/abandoned-checkout` radi na 15 minuta i traži `Authorization: Bearer` sa `CRON_SECRET`. Uspeh upisuje `subscriptions.reminder_1h_sent_at`. Tri neuspešna slanja zaustavljaju dalje pokušaje. Ako kartica u međuvremenu bude sačuvana, podsetnik se ne šalje.
 
-Rezervni put ako korisnik zatvori browser: dashboard pokaže kratak jednokratni kod. Korisnik pošalje botu `/start <kod>`. Isti heš, isti rok, isti efekat.
+Ako korisnik zatvori tab pre verifikacije, povratak na onboarding ponovo otvara čekanje i izdaje jedan novi token. Rezervni kod na dashboardu još nije u ovoj celini.
 
 Token koji je istekao ili već iskorišćen ne povezuje nalog. Korisnik traži novi iz dashboarda.
 
@@ -271,9 +276,10 @@ Svi primarni ključevi su UUID. Sva vremena u bazi su `timestamptz` u UTC. „Lo
 | Kolona | Tip | Pravilo |
 |---|---|---|
 | `id` | uuid PK | |
-| `telegram_id` | bigint UNIQUE NULL | NULL dok deep link nije iskorišćen |
-| `telegram_username` | text NULL | bez `@` |
-| `telegram_first_name` | text NULL | osvežava se na `/start` |
+| `telegram_id` | bigint UNIQUE NULL | NULL dok deep link nije iskorišćen. Aplikacija ga drži kao string |
+| `telegram_username` | text NULL | bez `@`. Posle webhooka ovo je username sa Telegrama |
+| `telegram_first_name` | text NULL | osvežava se na `/start`. Ne prepisuje `first_name` iz forme |
+| `telegram_photo_file_id` | text NULL | Telegram `file_id` profilne slike. URL fajla se ne čuva |
 | `display_name` | text NULL | custom nadimak sa sajta; ako postoji, poruke koriste njega |
 | `email` | text NULL UNIQUE | magic link |
 | `language` | text NOT NULL | `en` ili `sr`, default `en` |
@@ -349,6 +355,8 @@ Brisanje je hard delete. Ciphertext nestaje. Redovi u `trades` ostaju. `trades.e
 | `expires_at` | timestamptz | 30 minuta od izdavanja |
 | `used_at` | timestamptz NULL | |
 | `created_at` | timestamptz | |
+
+`issueLinkToken` briše neiskorišćene tokene istog korisnika pre novog upisa. `user_id` je `ON DELETE CASCADE`. U bazi je SHA-256 heks heš, ne sirovi token.
 
 ### 8.5 `webhook_endpoints` (runtime od V1.1, šema od prvog dana)
 
@@ -798,6 +806,10 @@ Next.js:
 - `ENGINE_URL`
 - `ENGINE_INTERNAL_SECRET`
 - `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` = `TradelytBot`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_WEBHOOK_SECRET` (Telegram `secret_token`, 1–256 znakova, `A–Z a–z 0–9 _ -`)
+- `TELEGRAM_WEBHOOK_URL` (pun HTTPS URL za `setWebhook`; prazan dok nema javnog tunela ili produkcionog domena)
+- `CRON_SECRET` (Bearer tajna za `GET /api/cron/abandoned-checkout`)
 
 Express:
 

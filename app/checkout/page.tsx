@@ -5,6 +5,7 @@ import { CheckoutScreen } from "@/components/checkout/checkout-screen"
 import { checkoutMode } from "@/components/checkout/mode"
 import { readActorUserId, readUserIdFromCookies } from "@/lib/session-store"
 import { cardConfirmed, getBillingAccount } from "@/lib/subscriptions"
+import { telegramReady } from "@/lib/telegram-ready"
 
 export const metadata: Metadata = {
   title: "Start your free trial · Tradelyt",
@@ -27,6 +28,7 @@ export default async function CheckoutPage({
   if (!durableUserId && params.activation !== "failed" && params.activation !== "pending" && (await cardConfirmed(account))) {
     redirect("/api/activate-session")
   }
+  if (!(await telegramReady(userId))) redirect("/onboarding")
 
   const name = `${account.firstName} ${account.lastName}`.trim()
   const mode = checkoutMode(account.accountStatus, account.subscription?.status ?? null)

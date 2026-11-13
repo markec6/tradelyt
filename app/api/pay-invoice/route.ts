@@ -3,6 +3,7 @@ import Stripe from "stripe"
 import { readActorUserId } from "@/lib/session-store"
 import { getStripe } from "@/lib/stripe"
 import { cardConfirmed, getBillingAccount } from "@/lib/subscriptions"
+import { telegramReady } from "@/lib/telegram-ready"
 
 function jsonError(error: string, status: number, code?: string) {
   return Response.json(code ? { error, code } : { error }, { status })
@@ -11,6 +12,7 @@ function jsonError(error: string, status: number, code?: string) {
 export async function POST() {
   const userId = await readActorUserId()
   if (!userId) return jsonError("Could not renew your subscription.", 401)
+  if (!(await telegramReady(userId))) return jsonError("Connect Telegram before checkout.", 403, "telegram_required")
 
   const account = await getBillingAccount(userId)
   const subscription = account?.subscription

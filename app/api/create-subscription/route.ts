@@ -3,6 +3,7 @@ import Stripe from "stripe"
 import { readActorUserId } from "@/lib/session-store"
 import { cardIsSaved, getPriceId, getStripe, setupClientSecret } from "@/lib/stripe"
 import { getBillingAccount, upsertSubscriptionFromStripe, type BillingAccount } from "@/lib/subscriptions"
+import { telegramReady } from "@/lib/telegram-ready"
 import { toE164 } from "@/components/onboarding/phone-number"
 import { telegramHandleError } from "@/components/onboarding/validate-telegram"
 import { neon } from "@neondatabase/serverless"
@@ -46,6 +47,7 @@ async function reuseOpenSubscription(account: BillingAccount) {
 export async function POST(request: Request) {
   const userId = await readActorUserId()
   if (!userId) return jsonError("Save your account before starting the trial.", 401)
+  if (!(await telegramReady(userId))) return jsonError("Connect Telegram before checkout.", 403, "telegram_required")
 
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) return jsonError("Could not start your trial.", 500)
@@ -94,7 +96,8 @@ export async function POST(request: Request) {
     const phone = typeof profile.phone_number === "string" ? profile.phone_number : ""
     const telegram = typeof profile.telegram_username === "string" ? profile.telegram_username.replace(/^@+/, "") : ""
     if (!toE164(phone, country)) return jsonError("Enter a valid phone number.", 400)
-    if (telegramHandleError(telegram)) return jsonError("Enter your Telegram username.", 400)
+    const telegramError = telegramHandleError(telegram)
+    if (telegramError) return jsonError(telegramError, 400)
 
     let customerId = account.stripeCustomerId
     if (!customerId) {

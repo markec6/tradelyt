@@ -13,6 +13,7 @@ import { useOnboarding } from "./onboarding-context"
 import { ReviewStep } from "./review-step"
 import { RiskStep } from "./risk-step"
 import { TelegramStep } from "./telegram-step"
+import { resetTelegramLink, TelegramVerify } from "./telegram-verify"
 import {
   ACCOUNT_FIELD_ORDER,
   EMPTY_ACCOUNT,
@@ -20,8 +21,8 @@ import {
   type AccountDraft,
   type AccountErrors,
 } from "./validate-account"
-import { EMPTY_TELEGRAM, telegramHandleError, type TelegramDraft } from "./validate-telegram"
-import type { OnboardingResume } from "./resume"
+import { EMPTY_TELEGRAM, type TelegramDraft } from "./validate-telegram"
+import type { OnboardingResume, TelegramPhase } from "./resume"
 import {
   EMPTY_EXCHANGE,
   EXCHANGE_FIELD_ORDER,
@@ -45,7 +46,7 @@ const STEP_COPY = {
   },
   2: {
     title: "Connect Telegram",
-    body: "Your name and the alerts you want.",
+    body: "Choose the alerts you want.",
   },
   3: {
     title: "Connect your exchange",
@@ -84,6 +85,7 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
   const reduced = useReducedMotion()
   const router = useRouter()
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(resume?.step ?? 1)
+  const [telegramPhase, setTelegramPhase] = useState<TelegramPhase>(resume?.telegramPhase ?? "form")
   const [draft, setDraft] = useState<AccountDraft>(resume?.account ?? EMPTY_ACCOUNT)
   const [telegram, setTelegram] = useState<TelegramDraft>(resume?.telegram ?? EMPTY_TELEGRAM)
   const [exchange, setExchange] = useState<ExchangeDraft>(resume?.exchange ?? EMPTY_EXCHANGE)
@@ -95,7 +97,18 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
   const [riskErrors, setRiskErrors] = useState<RiskErrors>({})
   const [launchError, setLaunchError] = useState("")
   const [saving, setSaving] = useState(false)
-  const copy = STEP_COPY[step]
+  const copy =
+    step === 2
+      ? {
+          title: STEP_COPY[2].title,
+          body:
+            telegramPhase === "wait"
+              ? "Open the bot and tap Start. This page updates on its own."
+              : telegramPhase === "form"
+                ? STEP_COPY[2].body
+                : "",
+        }
+      : STEP_COPY[step]
 
   function update(patch: Partial<AccountDraft>) {
     setDraft((current) => ({ ...current, ...patch }))
@@ -145,27 +158,51 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
     })
   }
 
+  function acceptTelegram(username: string) {
+    setTelegram((current) => ({ ...current, handle: username }))
+    setTelegramPhase("form")
+    setStep(3)
+  }
+
   async function submitTelegram() {
-    const handleError = telegramHandleError(telegram.handle)
-    if (handleError) {
-      setTelegramErrors({ handle: handleError })
-      document.getElementById("telegramHandle")?.focus()
-      return
-    }
     if (!userId) {
       setTelegramErrors({ form: "Save your account before connecting Telegram." })
       return
     }
 
     setSaving(true)
+    setTelegramErrors({})
     try {
       const result = await saveTelegram(telegram)
       if (!result.ok) {
         setTelegramErrors(result.errors)
-        if (result.errors.handle) document.getElementById("telegramHandle")?.focus()
         return
       }
-      setStep(3)
+      const response = await fetch("/api/telegram/status", { cache: "no-store" })
+      if (response.status === 401) {
+        setTelegramErrors({ form: "Save your account before connecting Telegram." })
+        return
+      }
+      if (!response.ok) {
+        setTelegramPhase("wait")
+        return
+      }
+      const body = (await response.json()) as {
+        verified?: boolean
+        hasUsername?: boolean
+        username?: string
+      }
+      if (body.verified && body.hasUsername && body.username) {
+        acceptTelegram(body.username)
+        return
+      }
+      if (body.verified && !body.hasUsername) {
+        setTelegramPhase("needs-username")
+        return
+      }
+      setTelegramPhase("wait")
+    } catch {
+      setTelegramErrors({ form: "Could not save Telegram." })
     } finally {
       setSaving(false)
     }
@@ -327,13 +364,27 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
                   onChange={update}
                   onSubmit={submitAccount}
                 />
-              ) : step === 2 ? (
+              ) : step === 2 && telegramPhase === "form" ? (
                 <TelegramStep
                   draft={telegram}
-                  handleError={telegramErrors.handle}
                   formError={telegramErrors.form}
                   onChange={updateTelegram}
                   onSubmit={submitTelegram}
+                />
+              ) : step === 2 ? (
+                <TelegramVerify
+                  phase={telegramPhase === "form" ? "wait" : telegramPhase}
+                  onVerified={acceptTelegram}
+                  onNeedsUsername={() => setTelegramPhase("needs-username")}
+                  onExpired={() => setTelegramPhase("expired")}
+                  onAuthError={() => {
+                    setTelegramErrors({ form: "Save your account before connecting Telegram." })
+                    setTelegramPhase("form")
+                  }}
+                  onRestart={() => {
+                    resetTelegramLink()
+                    setTelegramPhase("wait")
+                  }}
                 />
               ) : step === 3 ? (
                 <ExchangeStep
@@ -364,6 +415,11 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
                 type="button"
                 onClick={() => {
                   setLaunchError("")
+                  if (step === 2 && telegramPhase !== "form") {
+                    setTelegramPhase("form")
+                    return
+                  }
+                  if (step === 3) setTelegramPhase("form")
                   setStep(step === 5 ? 4 : step === 4 ? 3 : step === 3 ? 2 : 1)
                 }}
                 className="inline-flex items-center justify-center rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-300 transition-colors duration-200 hover:border-slate-500 hover:bg-slate-800 hover:text-white"
@@ -371,7 +427,16 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
                 Back
               </button>
             )}
-            {step < 5 ? (
+            {step === 5 ? (
+              <button
+                type="button"
+                onClick={() => void launch()}
+                disabled={saving}
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400 disabled:opacity-70"
+              >
+                Launch Tradelyt
+              </button>
+            ) : step === 2 && telegramPhase !== "form" ? null : (
               <button
                 type="submit"
                 form={
@@ -381,15 +446,6 @@ export function OnboardingWizard({ resume }: { resume: OnboardingResume | null }
                 className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400 disabled:opacity-70"
               >
                 Next
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void launch()}
-                disabled={saving}
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.28)] transition-colors duration-200 hover:bg-emerald-400 disabled:opacity-70"
-              >
-                Launch Tradelyt
               </button>
             )}
             </div>

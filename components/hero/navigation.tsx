@@ -1,8 +1,8 @@
 "use client"
 
-import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 
+import { GuestMenu } from "@/components/account/guest-menu"
 import { ProfileMenu } from "@/components/account/profile-menu"
 import type { SessionProfile } from "@/lib/profile"
 
@@ -97,13 +97,9 @@ export function Navigation({ profile = null }: { profile?: SessionProfile | null
 
           {/* Right Side */}
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            <Link
-              href="/onboarding"
-              className="inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-2.5 py-1.5 sm:px-5 sm:py-2 rounded-xl text-[11px] sm:text-sm shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-colors whitespace-nowrap"
-            >
-              Launch App
-            </Link>
-            {session ? <ProfileMenu profile={session} /> : null}
+            <div className="hidden lg:block">
+              {session ? <ProfileMenu profile={session} /> : <GuestMenu />}
+            </div>
 
             <button
               type="button"
@@ -125,6 +121,8 @@ export function Navigation({ profile = null }: { profile?: SessionProfile | null
 
         {isMenuOpen && (
           <div className="lg:hidden border-t border-slate-800 mt-2 pt-2 pb-1">
+            {session ? <ProfileMenu profile={session} inline /> : <GuestMenu inline />}
+            <div className="my-1 border-t border-slate-800" />
             {NAV_LINKS.map((link) => (
               <a
                 key={link.href}

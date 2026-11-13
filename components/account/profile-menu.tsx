@@ -14,14 +14,14 @@ const outfit = Outfit({
   display: "swap",
 })
 
-export function ProfileMenu({ profile }: { profile: SessionProfile }) {
+export function ProfileMenu({ profile, inline = false }: { profile: SessionProfile; inline?: boolean }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
-  const label = profile.username ? `@${profile.username}` : "Nalog"
+  const label = profile.username ? `@${profile.username}` : "Account"
 
   useEffect(() => {
-    if (!open) return
+    if (inline || !open) return
     function onPointerDown(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
@@ -34,7 +34,32 @@ export function ProfileMenu({ profile }: { profile: SessionProfile }) {
       document.removeEventListener("pointerdown", onPointerDown)
       document.removeEventListener("keydown", onKeyDown)
     }
-  }, [open])
+  }, [inline, open])
+
+  if (inline) {
+    return (
+      <div className={`${outfit.className} px-1 py-1`}>
+        <div className="flex items-center gap-2 px-2 py-2">
+          <UserAvatar url={profile.avatarUrl} name={label} className="size-8" />
+          <span className="max-w-[12rem] truncate text-sm text-white">{label}</span>
+        </div>
+        <Link
+          href="/"
+          className="block rounded-xl px-3 py-2 text-sm text-slate-200 hover:bg-white/5 hover:text-white"
+        >
+          Back to site
+        </Link>
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5 hover:text-white"
+          >
+            Log out
+          </button>
+        </form>
+      </div>
+    )
+  }
 
   return (
     <div ref={rootRef} className={`${outfit.className} relative shrink-0`}>
@@ -63,15 +88,7 @@ export function ProfileMenu({ profile }: { profile: SessionProfile }) {
             className="block rounded-xl px-3 py-2 text-sm text-slate-200 hover:bg-white/5 hover:text-white"
             onClick={() => setOpen(false)}
           >
-            Nazad na sajt
-          </Link>
-          <Link
-            href="/dashboard"
-            role="menuitem"
-            className="block rounded-xl px-3 py-2 text-sm text-slate-200 hover:bg-white/5 hover:text-white"
-            onClick={() => setOpen(false)}
-          >
-            Dashboard
+            Back to site
           </Link>
           <form action={signOut}>
             <button
@@ -79,7 +96,7 @@ export function ProfileMenu({ profile }: { profile: SessionProfile }) {
               role="menuitem"
               className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5 hover:text-white"
             >
-              Odjava
+              Log out
             </button>
           </form>
         </div>

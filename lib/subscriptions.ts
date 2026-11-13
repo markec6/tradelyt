@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless"
 import type Stripe from "stripe"
 
 import { getPriceId, getStripe, cardIsSaved } from "@/lib/stripe"
+import { maybeSendWelcome } from "@/lib/welcome"
 
 const SUBSCRIPTION_STATUSES = [
   "incomplete",
@@ -232,6 +233,9 @@ export async function upsertSubscriptionFromStripe(userId: string, subscription:
     `)
   }
   await sql.transaction(statements)
+  if ((status === "trialing" || status === "active") && cardIsSaved(subscription)) {
+    await maybeSendWelcome(userId, subscription)
+  }
   return { status, trialEndsAt, currentPeriodEnd: periodEnd }
 }
 

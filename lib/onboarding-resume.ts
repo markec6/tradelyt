@@ -1,10 +1,10 @@
 import { neon } from "@neondatabase/serverless"
 
-import type { OnboardingResume, OnboardingStep } from "@/components/onboarding/resume"
+import type { OnboardingResume, OnboardingStep, TelegramPhase } from "@/components/onboarding/resume"
 import { EMPTY_ACCOUNT } from "@/components/onboarding/validate-account"
 import { EMPTY_EXCHANGE, type ExchangeId, type TradingMode } from "@/components/onboarding/validate-exchange"
 import { DEFAULT_MAX_DRAWDOWN, DEFAULT_RISK_PER_TRADE, EMPTY_RISK, type StrategyId } from "@/components/onboarding/validate-risk"
-import { EMPTY_TELEGRAM } from "@/components/onboarding/validate-telegram"
+import { EMPTY_TELEGRAM, telegramHandleError } from "@/components/onboarding/validate-telegram"
 
 const EXCHANGES = new Set<ExchangeId>(["paper", "binance_testnet", "bybit_testnet", "binance", "bybit", "okx"])
 const STRATEGIES = new Set<StrategyId>(["dca", "grid", "momentum"])
@@ -47,6 +47,8 @@ export async function loadOnboardingResume(userId: string): Promise<OnboardingRe
       u.phone_number,
       u.country,
       u.telegram_username,
+      u.telegram_id::text AS telegram_id,
+      b.user_id AS bot_user_id,
       b.notify_trade_executions,
       b.notify_risk_warnings,
       b.notify_daily_pnl,
@@ -69,17 +71,25 @@ export async function loadOnboardingResume(userId: string): Promise<OnboardingRe
   const country = text(row.country)
   const phone = text(row.phone_number)
   const telegram = text(row.telegram_username).replace(/^@+/, "")
+  const linked = text(row.telegram_id).length > 0
+  const hasBot = text(row.bot_user_id).length > 0
+  const usernameOk = !telegramHandleError(telegram)
   const exchange = asExchange(text(row.exchange_name))
   const strategy = asStrategy(text(row.strategy))
 
   let step: OnboardingStep = 5
+  let telegramPhase: TelegramPhase = "form"
   if (!phone || !/^[A-Z]{2}$/.test(country)) step = 1
-  else if (!telegram) step = 2
-  else if (!exchange) step = 3
+  else if (!linked || !usernameOk) {
+    step = 2
+    if (linked) telegramPhase = "needs-username"
+    else if (hasBot) telegramPhase = "wait"
+  } else if (!exchange) step = 3
   else if (!strategy) step = 4
 
   return {
     step,
+    telegramPhase,
     account: {
       ...EMPTY_ACCOUNT,
       firstName: text(row.first_name),

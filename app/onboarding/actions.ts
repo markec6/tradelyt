@@ -9,11 +9,14 @@ import { validateAccount, type AccountDraft, type AccountErrors } from "@/compon
 import { validateExchange, type ExchangeDraft, type ExchangeErrors } from "@/components/onboarding/validate-exchange"
 import { validateRisk, withDefaults, type RiskDraft, type RiskErrors } from "@/components/onboarding/validate-risk"
 import { telegramHandleError, type TelegramDraft } from "@/components/onboarding/validate-telegram"
+import { issueLinkToken } from "@/lib/link-tokens"
+import { telegramDeepLink } from "@/lib/telegram"
 import { getDb } from "@/db"
 import { users } from "@/db/schema"
 import { cardConnected } from "@/lib/subscriptions"
 import { hashPassword } from "@/lib/password"
 import { readActorUserId, setOnboardingCookie } from "@/lib/session-store"
+import { telegramReady } from "@/lib/telegram-ready"
 
 const EMAIL_TAKEN = "An account with this email already exists."
 const PHONE_TAKEN = "This phone number is already in use."
@@ -132,10 +135,6 @@ export async function saveTelegram(
     return { ok: false, errors: { form: "Your trial is already confirmed." } }
   }
 
-  const handle = draft.handle.replace(/^@+/, "")
-  const handleError = telegramHandleError(handle)
-  if (handleError) return { ok: false, errors: { handle: handleError } }
-
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) {
     return { ok: false, errors: { form: "Could not save Telegram." } }
@@ -143,44 +142,47 @@ export async function saveTelegram(
 
   try {
     const sql = neon(databaseUrl)
-    const [updated] = await sql.transaction([
-      sql`
-        UPDATE users
-        SET telegram_username = ${handle}, updated_at = now()
-        WHERE id = ${userId}
-        RETURNING id
-      `,
-      sql`
-        INSERT INTO bot_settings (
-          user_id,
-          notify_trade_executions,
-          notify_risk_warnings,
-          notify_daily_pnl
-        )
-        VALUES (
-          ${userId},
-          ${draft.tradeExecutions},
-          ${draft.riskWarnings},
-          ${draft.dailyPnl}
-        )
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-          notify_trade_executions = EXCLUDED.notify_trade_executions,
-          notify_risk_warnings = EXCLUDED.notify_risk_warnings,
-          notify_daily_pnl = EXCLUDED.notify_daily_pnl,
-          updated_at = now()
-      `,
-    ])
-    if (!updated[0]?.id) {
+    const updated = await sql`
+      INSERT INTO bot_settings (
+        user_id,
+        notify_trade_executions,
+        notify_risk_warnings,
+        notify_daily_pnl
+      )
+      VALUES (
+        ${userId},
+        ${draft.tradeExecutions},
+        ${draft.riskWarnings},
+        ${draft.dailyPnl}
+      )
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        notify_trade_executions = EXCLUDED.notify_trade_executions,
+        notify_risk_warnings = EXCLUDED.notify_risk_warnings,
+        notify_daily_pnl = EXCLUDED.notify_daily_pnl,
+        updated_at = now()
+      RETURNING user_id
+    `
+    if (!updated[0]?.user_id) {
       return { ok: false, errors: { form: "Could not save Telegram." } }
     }
     return { ok: true }
-  } catch (error) {
-    const code = typeof error === "object" && error && "code" in error ? String(error.code) : ""
-    if (code === "23505") {
-      return { ok: false, errors: { handle: "This Telegram account is already connected." } }
-    }
+  } catch {
     return { ok: false, errors: { form: "Could not save Telegram." } }
+  }
+}
+
+export async function issueTelegramLink(): Promise<
+  { ok: true; url: string; expiresAt: string } | { ok: false; error: string }
+> {
+  const userId = await readActorUserId()
+  if (!userId) return { ok: false, error: "Save your account before connecting Telegram." }
+  if (await cardConnected(userId)) return { ok: false, error: "Your trial is already confirmed." }
+  try {
+    const issued = await issueLinkToken(userId)
+    return { ok: true, url: telegramDeepLink(issued.token), expiresAt: issued.expiresAt }
+  } catch {
+    return { ok: false, error: "Could not open Telegram." }
   }
 }
 
@@ -309,8 +311,11 @@ export async function launchTradelyt(): Promise<{ ok: true } | { ok: false; erro
       LIMIT 1
     `
     const phone = typeof rows[0]?.phone_number === "string" ? rows[0].phone_number : ""
-    const telegram = typeof rows[0]?.telegram_username === "string" ? rows[0].telegram_username : ""
-    if (!phone || !telegram) return { ok: false, error: "Add your phone number and Telegram before checkout." }
+    const telegram = typeof rows[0]?.telegram_username === "string" ? rows[0].telegram_username.replace(/^@+/, "") : ""
+    if (!phone) return { ok: false, error: "Add your phone number and Telegram before checkout." }
+    if (telegramHandleError(telegram) || !(await telegramReady(userId))) {
+      return { ok: false, error: "Connect Telegram before checkout." }
+    }
     return { ok: true }
   } catch {
     return { ok: false, error: "Could not launch Tradelyt." }

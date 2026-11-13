@@ -16,12 +16,12 @@ export function UserAvatar({
 }) {
   const [failed, setFailed] = useState(false)
   const src = failed ? DEFAULT_AVATAR_SRC : avatarSrc(url)
-  const remote = src.startsWith("http://") || src.startsWith("https://")
+  const remote = src.startsWith("http://") || src.startsWith("https://") || src.startsWith("/api/")
   const alt = name ? `${name} avatar` : "Account"
   const classNames = `${className} rounded-full border border-white/10 object-cover`
   if (remote) {
     return (
-      // Object-storage URLs are served directly; the optimizer only handles the local placeholder.
+      // Remote files and the Telegram avatar route are served directly. The optimizer only handles the local placeholder.
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={src}
