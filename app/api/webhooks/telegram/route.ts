@@ -15,6 +15,7 @@ import {
 const START_FROM_SITE = "Start verification from the Tradelyt site."
 const TAKEN = "Ovaj Telegram nalog je već povezan sa drugim Tradelyt nalogom."
 const CONNECTED = "🚀 Your Tradelyt account is successfully connected via Telegram!"
+const READ_ONLY = "This chat is for notifications only. Please use the platform."
 const START = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s+(\S+))?\s*$/
 
 function database() {
@@ -147,7 +148,7 @@ async function handleUpdate(update: TelegramUpdate) {
     payloadLength: start.command && start.payload ? start.payload.length : 0,
   })
   if (!start.command) {
-    logWebhook("ignored", { reason: "not-start" })
+    await reply(message, READ_ONLY)
     return
   }
   if (!start.payload) {
