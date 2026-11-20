@@ -38,8 +38,11 @@ export async function ensureTelegramWebhook(): Promise<{ ok: true } | { ok: fals
 
   const info = await fetch(apiUrl("getWebhookInfo"))
   const infoBody = asRecord(await info.json().catch(() => null))
-  const current = infoBody?.ok === true ? asRecord(infoBody.result)?.url : ""
-  if (current === webhookUrl) return { ok: true }
+  const result = infoBody?.ok === true ? asRecord(infoBody.result) : null
+  const current = typeof result?.url === "string" ? result.url : ""
+  const allowed = Array.isArray(result?.allowed_updates) ? result.allowed_updates.filter((item): item is string => typeof item === "string") : []
+  const hasCallback = allowed.includes("callback_query")
+  if (current === webhookUrl && hasCallback) return { ok: true }
 
   const set = await fetch(apiUrl("setWebhook"), {
     method: "POST",
@@ -47,7 +50,7 @@ export async function ensureTelegramWebhook(): Promise<{ ok: true } | { ok: fals
     body: JSON.stringify({
       url: webhookUrl,
       secret_token: secret,
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "my_chat_member", "callback_query"],
     }),
   })
   const setBody = asRecord(await set.json().catch(() => null))
@@ -79,10 +82,19 @@ export type TelegramChatMember = {
   status: string
 }
 
+export type TelegramCallback = {
+  id: string
+  data: string
+  from: TelegramUser
+  chatId: string
+  messageId: string
+}
+
 export type TelegramUpdate = {
   updateId: string
   message?: TelegramMessage
   myChatMember?: TelegramChatMember
+  callback?: TelegramCallback
 }
 
 export type ProfilePhoto =
@@ -144,6 +156,30 @@ export function parseUpdate(value: unknown): TelegramUpdate | null {
   const updateId = update ? safeId(update.update_id) : null
   if (!update || !updateId) return null
   const parsed: TelegramUpdate = { updateId }
+  const callback = asRecord(update.callback_query)
+  if (callback) {
+    const callbackId = typeof callback.id === "string" ? callback.id : ""
+    const data = typeof callback.data === "string" ? callback.data : ""
+    const from = asRecord(callback.from)
+    const callbackMessage = asRecord(callback.message)
+    const callbackChat = callbackMessage ? asRecord(callbackMessage.chat) : null
+    const fromId = from ? safeId(from.id) : null
+    const chatId = callbackChat ? safeId(callbackChat.id) : null
+    const messageId = callbackMessage ? safeId(callbackMessage.message_id) : null
+    if (callbackId && data && from && fromId && chatId && messageId) {
+      parsed.callback = {
+        id: callbackId,
+        data,
+        from: {
+          id: fromId,
+          username: cleanUsername(from.username),
+          firstName: cleanFirstName(from.first_name),
+        },
+        chatId,
+        messageId,
+      }
+    }
+  }
   const memberUpdate = asRecord(update.my_chat_member)
   if (memberUpdate) {
     const memberChat = asRecord(memberUpdate.chat)
@@ -174,34 +210,108 @@ export function parseUpdate(value: unknown): TelegramUpdate | null {
   return parsed
 }
 
-export type TelegramSendResult =
-  | { ok: true }
-  | { ok: false; errorCode: number | null; description: string }
+export type TelegramButton = { text: string; data: string }
 
-export async function sendMessage(chatId: string, text: string): Promise<TelegramSendResult> {
+export type TelegramSendOptions = {
+  html?: boolean
+  silent?: boolean
+  buttons?: TelegramButton[]
+  prefix?: boolean
+}
+
+export type TelegramSendResult =
+  | { ok: true; messageId: string | null }
+  | { ok: false; errorCode: number | null; description: string; retryAfter: number | null }
+
+function markup(buttons: TelegramButton[] | undefined) {
+  if (!buttons || buttons.length === 0) return undefined
+  return { inline_keyboard: [buttons.map((button) => ({ text: button.text, callback_data: button.data }))] }
+}
+
+function sendFailure(body: Record<string, unknown> | null, fallback: string) {
+  const parameters = body ? asRecord(body.parameters) : null
+  const retryAfter = parameters && typeof parameters.retry_after === "number" ? parameters.retry_after : null
+  return {
+    ok: false as const,
+    errorCode: typeof body?.error_code === "number" ? body.error_code : null,
+    description: typeof body?.description === "string" && body.description ? body.description : fallback,
+    retryAfter,
+  }
+}
+
+export async function sendMessage(chatId: string, text: string, options: TelegramSendOptions = {}): Promise<TelegramSendResult> {
   try {
     const response = await fetch(apiUrl("sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `Tradelyt\n${text}`,
-        disable_notification: false,
+        text: options.prefix === false ? text : `Tradelyt\n${text}`,
+        disable_notification: options.silent === true,
+        parse_mode: options.html ? "HTML" : undefined,
+        reply_markup: markup(options.buttons),
       }),
     })
-    if (response.ok) return { ok: true }
-    let errorCode: number | null = null
-    let description = "Telegram sendMessage failed."
-    try {
-      const body = asRecord(await response.json())
-      if (typeof body?.error_code === "number") errorCode = body.error_code
-      if (typeof body?.description === "string" && body.description) description = body.description
-    } catch {
-      description = "Telegram sendMessage failed."
+    const body = asRecord(await response.json().catch(() => null))
+    if (response.ok && body?.ok === true) {
+      const result = asRecord(body.result)
+      const messageId = result ? safeId(result.message_id) : null
+      return { ok: true, messageId }
     }
-    return { ok: false, errorCode, description }
+    return sendFailure(body, "Telegram sendMessage failed.")
   } catch {
-    return { ok: false, errorCode: null, description: "Telegram sendMessage failed." }
+    return { ok: false, errorCode: null, description: "Telegram sendMessage failed.", retryAfter: null }
+  }
+}
+
+export async function editMessage(chatId: string, messageId: string, text: string, options: TelegramSendOptions = {}): Promise<TelegramSendResult> {
+  try {
+    const response = await fetch(apiUrl("editMessageText"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: Number(messageId),
+        text,
+        parse_mode: options.html ? "HTML" : undefined,
+        reply_markup: markup(options.buttons) ?? { inline_keyboard: [] },
+      }),
+    })
+    const body = asRecord(await response.json().catch(() => null))
+    const description = typeof body?.description === "string" ? body.description : ""
+    if (response.ok && body?.ok === true) return { ok: true, messageId }
+    if (description.includes("message is not modified")) return { ok: true, messageId }
+    return sendFailure(body, "Telegram editMessageText failed.")
+  } catch {
+    return { ok: false, errorCode: null, description: "Telegram editMessageText failed.", retryAfter: null }
+  }
+}
+
+export async function clearButtons(chatId: string, messageId: string) {
+  try {
+    await fetch(apiUrl("editMessageReplyMarkup"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: Number(messageId),
+        reply_markup: { inline_keyboard: [] },
+      }),
+    })
+  } catch {
+    // The next zone message still stands if the old keyboard stays.
+  }
+}
+
+export async function answerCallback(callbackId: string, text: string) {
+  try {
+    await fetch(apiUrl("answerCallbackQuery"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackId, text: text.slice(0, 180) }),
+    })
+  } catch {
+    // Telegram hides the button spinner if this is late. The trade change still stands.
   }
 }
 

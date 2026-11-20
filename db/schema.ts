@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { bigint, boolean, char, check, customType, date, foreignKey, index, integer, numeric, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core"
+import { bigint, boolean, char, check, customType, date, foreignKey, index, integer, numeric, pgTable, smallint, text, time, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 
 const citext = customType<{ data: string }>({
   dataType() {
@@ -31,6 +31,11 @@ export const botSettings = pgTable("bot_settings", {
 	stopLossEnabled: boolean("stop_loss_enabled").default(true).notNull(),
 	trailingTakeProfit: boolean("trailing_take_profit").default(true).notNull(),
 	emergencyStopVolatility: boolean("emergency_stop_volatility").default(true).notNull(),
+	timezone: text().default("UTC").notNull(),
+	quietHoursEnabled: boolean("quiet_hours_enabled").default(false).notNull(),
+	quietHoursStart: time("quiet_hours_start"),
+	quietHoursEnd: time("quiet_hours_end"),
+	pausedAt: timestamp("paused_at", { withTimezone: true }),
 }, (table) => [
 	foreignKey({
 			columns: [table.userId],
@@ -58,11 +63,32 @@ export const trades = pgTable("trades", {
 	takeProfit2: numeric("take_profit_2", { precision: 20, scale:  8 }),
 	status: text().default('open').notNull(),
 	pnlAmount: numeric("pnl_amount", { precision: 20, scale:  8 }).default('0').notNull(),
-	pnlPercentage: numeric("pnl_percentage", { precision: 5, scale:  2 }).default('0').notNull(),
+	pnlPercentage: numeric("pnl_percentage", { precision: 10, scale:  2 }).default('0').notNull(),
 	openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow().notNull(),
 	closedAt: timestamp("closed_at", { withTimezone: true }),
 	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	mode: text(),
+	source: text().default("manual").notNull(),
+	quantity: numeric({ precision: 20, scale: 8 }),
+	remainingQuantity: numeric("remaining_quantity", { precision: 20, scale: 8 }),
+	leverage: numeric({ precision: 10, scale: 2 }),
+	zone: text(),
+	zoneChangedAt: timestamp("zone_changed_at", { withTimezone: true }),
+	liveMessageId: text("live_message_id"),
+	equityAtOpen: numeric("equity_at_open", { precision: 20, scale: 8 }),
+	positionEntries: integer("position_entries").default(1).notNull(),
+	tp1ConfirmedAt: timestamp("tp1_confirmed_at", { withTimezone: true }),
+	notifiedAt: timestamp("notified_at", { withTimezone: true }),
+	tpArmed: boolean("tp_armed").default(true).notNull(),
+	slAlertCount: integer("sl_alert_count").default(0).notNull(),
+	slAlertAt: timestamp("sl_alert_at", { withTimezone: true }),
+	lastEditPnl: numeric("last_edit_pnl", { precision: 10, scale: 2 }),
+	lastEditAt: timestamp("last_edit_at", { withTimezone: true }),
+	passiveRefreshedAt: timestamp("passive_refreshed_at", { withTimezone: true }),
+	priceSupported: boolean("price_supported").default(true).notNull(),
+	alertClaimedAt: timestamp("alert_claimed_at", { withTimezone: true }),
+	deferredZone: text("deferred_zone"),
 }, (table) => [
 	index("trades_user_opened_at_idx").using("btree", table.userId.asc().nullsLast().op("timestamptz_ops"), table.openedAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("trades_user_status_idx").using("btree", table.userId.asc().nullsLast().op("text_ops"), table.status.asc().nullsLast().op("text_ops")),
@@ -72,7 +98,14 @@ export const trades = pgTable("trades", {
 			name: "trades_user_id_fkey"
 		}).onDelete("cascade"),
 	check("trades_position_type_check", sql`position_type = ANY (ARRAY['long'::text, 'short'::text])`),
-	check("trades_status_check", sql`status = ANY (ARRAY['open'::text, 'closed'::text, 'canceled'::text, 'stopped'::text])`),
+	check("trades_status_check", sql`status = ANY (ARRAY['open'::text, 'closed'::text, 'canceled'::text, 'cancelled'::text, 'stopped'::text, 'tp1_hit'::text, 'tp2_hit'::text, 'closed_manual'::text])`),
+	check("trades_mode_check", sql`(mode IS NULL) OR (mode = ANY (ARRAY['scalper'::text, 'classic'::text, 'moonshot'::text]))`),
+	check("trades_source_check", sql`source = ANY (ARRAY['exchange'::text, 'manual'::text, 'webhook'::text])`),
+	check("trades_zone_check", sql`(zone IS NULL) OR (zone = ANY (ARRAY['neutral'::text, 'approach_tp1'::text, 'tp1'::text, 'approach_sl'::text, 'tp2'::text, 'sl'::text]))`),
+	check("trades_deferred_zone_check", sql`(deferred_zone IS NULL) OR (deferred_zone = ANY (ARRAY['tp1'::text, 'tp2'::text]))`),
+	check("trades_position_entries_check", sql`position_entries >= 1`),
+	check("trades_sl_alert_count_check", sql`(sl_alert_count >= 0) AND (sl_alert_count <= 4)`),
+	index("trades_tracked_idx").using("btree", table.status.asc().nullsLast().op("text_ops")).where(sql`status = ANY (ARRAY['open'::text, 'tp1_hit'::text])`),
 ]);
 
 export const dailyAnalytics = pgTable("daily_analytics", {
@@ -106,6 +139,11 @@ export const notificationsLog = pgTable("notifications_log", {
 	sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	templateId: uuid("template_id"),
+	zone: text(),
+	mode: text(),
+	telegramMessageId: text("telegram_message_id"),
+	eventKey: text("event_key"),
 }, (table) => [
 	index("notifications_log_trade_id_idx").using("btree", table.tradeId.asc().nullsLast().op("uuid_ops")),
 	index("notifications_log_user_sent_at_idx").using("btree", table.userId.asc().nullsLast().op("timestamptz_ops"), table.sentAt.desc().nullsFirst().op("timestamptz_ops")),
@@ -119,7 +157,13 @@ export const notificationsLog = pgTable("notifications_log", {
 			foreignColumns: [trades.id],
 			name: "notifications_log_trade_id_fkey"
 		}).onDelete("set null"),
-	check("notifications_log_notification_type_check", sql`notification_type = ANY (ARRAY['trade_opened'::text, 'trade_closed'::text, 'sl_hit'::text, 'tp_hit'::text, 'rule_broken'::text, 'daily_summary'::text, 'system'::text])`),
+	foreignKey({
+		columns: [table.templateId],
+		foreignColumns: [telegramMessageTemplates.id],
+		name: "notifications_log_template_id_fkey",
+	}).onDelete("set null"),
+	unique("notifications_log_event_key_key").on(table.eventKey),
+	check("notifications_log_notification_type_check", sql`notification_type = ANY (ARRAY['trade_opened'::text, 'trade_closed'::text, 'sl_hit'::text, 'tp_hit'::text, 'rule_broken'::text, 'daily_summary'::text, 'system'::text, 'zone_neutral'::text, 'zone_approach_tp1'::text, 'zone_approach_sl'::text, 'zone_tp1'::text, 'zone_tp2'::text, 'zone_sl'::text, 'special_positions'::text, 'silent_refresh'::text])`),
 ]);
 
 export const subscriptions = pgTable("subscriptions", {
@@ -171,6 +215,7 @@ export const users = pgTable("users", {
 	telegramPhotoFileId: text("telegram_photo_file_id"),
 	welcomeSentAt: timestamp("welcome_sent_at", { withTimezone: true }),
 	telegramBlockedAt: timestamp("telegram_blocked_at", { withTimezone: true }),
+	language: text().default("en").notNull(),
 }, (table) => [
 	unique("users_email_key").on(table.email),
 	unique("users_telegram_id_key").on(table.telegramId),
@@ -178,6 +223,7 @@ export const users = pgTable("users", {
 	check("users_country_iso", sql`(country IS NULL) OR (country ~ '^[A-Z]{2}$'::text)`),
 	check("users_account_status_check", sql`account_status = ANY (ARRAY['pending'::text, 'active'::text, 'suspended'::text, 'deleted'::text])`),
 	check("users_session_version_check", sql`session_version >= 0`),
+	check("users_language_check", sql`language = ANY (ARRAY['en'::text, 'sr'::text])`),
 	check("users_active_contact_check", sql`(account_status <> 'active'::text) OR ((phone_number IS NOT NULL) AND (telegram_username IS NOT NULL))`),
 ]);
 
@@ -271,6 +317,28 @@ export const telegramUpdates = pgTable("telegram_updates", {
 	updateId: text("update_id").primaryKey().notNull(),
 	receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const telegramMessageTemplates = pgTable("telegram_message_templates", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	code: text().notNull(),
+	mode: text(),
+	zone: text().notNull(),
+	variant: smallint().notNull(),
+	language: text().notNull(),
+	body: text().notNull(),
+	version: integer().default(1).notNull(),
+	isActive: boolean("is_active").default(true).notNull(),
+	lockedAt: timestamp("locked_at", { withTimezone: true }),
+	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+	uniqueIndex("telegram_message_templates_active_key").on(table.code, table.language).where(sql`is_active`),
+	check("telegram_message_templates_mode_check", sql`(mode IS NULL) OR (mode = ANY (ARRAY['scalper'::text, 'classic'::text, 'moonshot'::text]))`),
+	check("telegram_message_templates_zone_check", sql`zone = ANY (ARRAY['neutral'::text, 'tp1'::text, 'tp2'::text, 'sl'::text, 'special_positions'::text, 'approach_tp1'::text, 'approach_sl'::text])`),
+	check("telegram_message_templates_variant_check", sql`(variant >= 1) AND (variant <= 3)`),
+	check("telegram_message_templates_language_check", sql`language = ANY (ARRAY['en'::text, 'sr'::text])`),
+	check("telegram_message_templates_version_check", sql`version >= 1`),
+]);
 
 export const stripeEvents = pgTable("stripe_events", {
 	id: text().primaryKey().notNull(),

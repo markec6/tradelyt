@@ -1,10 +1,10 @@
 # PROJECT_CONTEXT.md
 
-Jedini izvor istine za Tradelyt. Svaki naredni chat, agent i linija koda polaze od ovog fajla.
+Jedini izvor istine za Tradelyt, osim Telegram poruka o trejdovima. Za modove, zone, 39 poruka, dugmad i rotaciju zakon je `TELEGRAM_MESSAGES_MASTER_PLAN.md`. Ako se ta dva fajla ne slažu oko poruka, master plan pobeđuje.
 
 Ako kod, kopija ili šema odstupaju od ovog dokumenta, dokument pobedjuje. Promena pravila ide prvo ovde, pa tek onda u kod. Ne izmišljati ponašanje koje ovde nije zapisano.
 
-Poslednje zaključavanje pravila: 2026-10-31. Partner landing copy dopunjen 2026-10-23 (poglavlje 3.4). Šema na Neon-u primenjena 2026-10-24, billing dopuna 2026-10-31 (poglavlje 18).
+Poslednje zaključavanje pravila: 2026-11-14, usklađeno sa master planom poruka. Partner landing copy dopunjen 2026-10-23 (poglavlje 3.4). Šema na Neon-u primenjena 2026-10-24, billing dopuna 2026-10-31 (poglavlje 18).
 
 ---
 
@@ -146,7 +146,7 @@ Next.js zove Express samo za:
 
 Sve ostalo što je CRUD podešavanja, pretplate i čitanje istorije ide iz Next.js direktno u Neon preko Drizzle-a. Next.js nikad ne selektuje ciphertext kolone da bi ih prikazao.
 
-WebSocket i poll od 2 sekunde žive samo u Expressu. Vercel serverless nije domaćin za berzanske sokete ni za Telegram long-polling.
+WebSocket i poll od 2 sekunde su cilj Expressa. Dok Expressa nema, zone prati `GET /api/cron/zones` na Vercelu, jednom u minutu, samo preko javnog Bybit tickera. Cron ne dekriptuje ključeve. Vercel serverless nije domaćin za berzanske sokete ni za Telegram long-polling.
 
 ### 5.1 Repozitorijum
 
@@ -299,7 +299,7 @@ Jedan red po korisniku.
 | `id` | uuid PK | |
 | `user_id` | uuid UNIQUE FK users | |
 | `is_active` | boolean NOT NULL | default `true` posle povezivanja |
-| `discipline_mode` | text NOT NULL | `scalper` \| `classic` \| `moonshot` |
+| `discipline_mode` | text NOT NULL | ostaje u šemi (`soft` \| `strict` \| `locked`). Ne bira mod trejda. Mod je `trades.mode` i računa se po trejdu |
 | `max_daily_trades` | int NOT NULL | |
 | `max_drawdown_percent` | numeric NOT NULL | |
 | `risk_per_trade_percent` | numeric NOT NULL | |
@@ -312,7 +312,7 @@ Jedan red po korisniku.
 
 Onboarding preset, upisuje se pri kreiranju reda. Korisnik ga menja samo na sajtu:
 
-- `discipline_mode = classic`
+- `discipline_mode` se ne koristi za Scalper, Classic ni Moonshot
 - `max_daily_trades = 3`
 - `max_drawdown_percent = 5`
 - `risk_per_trade_percent = 1`
@@ -407,7 +407,9 @@ Sirovi token se pokazuje jednom pri kreiranju ili rotaciji. Stari URL odmah pres
 - Korisnik zatvori na berzi ili preko `/close` pre TP/SL: `closed_manual`.
 - `cancelled` je za unos koji je povučen pre nego što je praćenje počelo.
 
-Zatvoren trejd (`stopped`, `tp2_hit`, `closed_manual`, `cancelled`) više ne dobija tiha osvežavanja ni SL alarm u petlji.
+Zatvoren trejd (`stopped`, `tp2_hit`, `closed_manual`, `cancelled`) više ne dobija osvežavanje ni SL alarm.
+
+Kolone moda, zone, količine, žive poruke i šablona poruka su u master planu, poglavlje 9, migracije `0013` i `0014`. `users.language` je `en` ili `sr`, default `en`.
 
 ### 8.7 `daily_analytics`
 
@@ -541,11 +543,13 @@ Više berzi i više ključeva po berzi (sub-nalozi preko `label`) su podržani �
 
 ## 10. Telegram
 
+Poruke zona, detekcija moda, 39 tekstova, dugmad, rotacija i specijalna situacija su u `TELEGRAM_MESSAGES_MASTER_PLAN.md`. Ovo poglavlje važi za ono što master plan ne pokriva. Gde se brojevi ne slažu, master plan pobeđuje.
+
 Samo privatni 1-na-1 chat. Nema poruka u grupe, kanale ni komentare.
 
 Jezik: `users.language`, default engleski, izbor na sajtu `en` | `sr`.
 
-Ime u poruci: `display_name` ako nije prazan, inače `telegram_first_name`, inače „there“ / „trader“.
+Ime u poruci: `first_name`, inače `telegram_first_name`, inače „there“ / „trader“. Kolona `display_name` još ne postoji.
 
 Poruke uključuju ime, relevantan PnL procenat i, kad poruka govori o stanju naloga, equity. Ne uključuju API ključ, tačan wallet ID ni savet „kupi“ ili „prodaj“.
 
@@ -557,26 +561,21 @@ Poruke uključuju ime, relevantan PnL procenat i, kad poruka govori o stanju nal
 | `/status` | otvoreni trejdovi, dnevni score, dnevni PnL%, da li je bot pauziran |
 | `/pause` | gasi sve odlazne poruke; upis u bazu se nastavlja |
 | `/resume` | ponovo uključuje poruke |
-| `/mode scalper\|classic\|moonshot` | menja `discipline_mode` |
 | `/limits` | samo prikazuje `max_daily_trades`, drawdown i risk; ne menja ih |
-| `/trade ...` | manual otvaranje, vidi poglavlje 12 |
+| `/trade ...` | manual otvaranje, vidi poglavlje 12. Količina je obavezna |
 | `/close <symbol>` | zatvara praćeni manual trejd kao `closed_manual` |
+
+Nema `/mode`. Mod se ne bira.
 
 Limiti, tihi sati, timezone, jezik i ključevi se menjaju isključivo na sajtu.
 
-### 10.2 Ritam tihog osvežavanja
+### 10.2 Živa poruka
 
-Šalje se samo dok je trejd u `open` ili `tp1_hit`, i samo ako se PnL procenat promenio bar za prag u odnosu na poslednje tiho osvežavanje tog trejda.
+Svaki otvoren trejd ima jednu Telegram poruku koja se edituje bez notifikacije. Nova poruka ide samo na prelaz u TP1, TP2, SL ili na specijalnu situaciju. Pravila su u master planu, poglavlja 4 i 4.1.
 
-| Mod | U profitu (PnL ≥ 0) | U minusu (PnL < 0) | Prag promene PnL |
-|---|---|---|---|
-| Scalper | 30 sekundi | 15 sekundi | 0.3 procentna poena |
-| Classic | 5 minuta | 2 minuta | 1 procentni poen |
-| Moonshot | 30 minuta | 10 minuta | 3 procentna poena |
+Dok cron radi na 1 minut, edit ne ide češće od toga. Prag promene PnL da bi se edit uopšte desio: Scalper 0,3, Classic 1, Moonshot 3 procentna poena. U plusu se edit dodatno smiruje na 5 minuta (Classic) i 30 minuta (Moonshot), u minusu na 2 i 10 minuta. Scalper ide svaki minut čim je prag pređen.
 
-Ako je interval prošao a cena se nije pomerila dovoljno, poruka se ne šalje i tajmer se meri iznova od te provere. Nema poruke „nema promene“.
-
-Van otvorenog trejda nema tihog osvežavanja.
+Van otvorenog trejda nema osvežavanja.
 
 ### 10.3 Tihi sati i dnevni rez
 
@@ -601,9 +600,9 @@ Ako je bilo trejdova, izveštaj sadrži broj trejdova, dnevni PnL%, discipline s
 |---|---|---|---|
 | Otvoren trejd | odmah, jednom | — | `trade_opened` |
 | Tiho osvežavanje | ritam iz 10.2 | — | `silent_refresh` |
-| TP1 | odmah, slavjenje, jednom | — | `tp1_hit` |
-| TP2 | odmah, slavjenje, jednom | — | `tp2_hit` |
-| SL pogodjen | odmah, podrška bez krivice, jednom | — | `sl_hit` |
+| TP1 | čim cena pređe prag, pa ponovo tek posle povratka u mirnu zonu i pauze iz master plana | — | `tp1_hit` |
+| TP2 | isto kao TP1 | — | `tp2_hit` |
+| SL pogodjen | odmah, pa najviše još 3 puta na po 5 minuta dok je trejd otvoren i cena je i dalje na pragu | — | `sl_hit` |
 | Ručno zatvaranje | odmah, jednom | — | `closed_manual` |
 | SL pomeran bliže ceni (manji rizik) | tiha potvrda, jednom po promeni | 0 | `sl_tightened` |
 | SL pomeran dalje od cene | alarm odmah, pa svakih 60s dok se ne vrati ili trejd ne zatvori | −25 jednom po epizodi | `sl_loosened` |
@@ -717,11 +716,11 @@ Dostupan u V1, sa ključem ili bez njega.
 
 Ulazi:
 
-1. Telegram: `/trade <symbol> <LONG|SHORT> <entry> SL <stop> TP <tp1> TP2 <tp2>`
-   - Obavezno: simbol, smer, entry, SL
-   - TP i TP2 su opcioni
-   - Primer: `/trade BTC LONG 64200 SL 63000 TP 66000 TP2 70000`
-2. Forma na dashboardu sa istim poljima.
+1. Telegram: `/trade <symbol> <LONG|SHORT> <entry> Q <quantity> SL <stop> TP <tp1> TP2 <tp2>`
+   - Obavezno: simbol, smer, entry, količina
+   - SL, TP i TP2 su opcioni. Dok oba praga fale, mod se ne zna prvih 2 minuta, zatim je Classic
+   - Primer: `/trade BTC LONG 64200 Q 0.01 SL 63000 TP 66000 TP2 70000`
+2. Forma na dashboardu sa istim poljima. Količina je obavezna.
 
 `source = manual`, `exchange_key_id = NULL`, status `open`.
 
@@ -852,10 +851,10 @@ Sva 34 pitanja su zatvorena 2026-09-23. Skraćeni zapis da se ne otvaraju ponovo
 1. Povezivanje: deep link primarno, jednokratni kod u dashboardu rezervno.
 2. Samo privatni chat.
 3. Engleski default, srpski u podešavanjima. Ime: custom nadimak, inače Telegram `first_name`.
-4. Intervali Scalper 30s/15s, Classic 5m/2m, Moonshot 30m/10m. Pragovi 0.3 / 1 / 3 procentna poena.
+4. Zamenjeno 2026-11-14: jedna živa poruka po trejdu. Pragovi edita ostaju 0,3 / 1 / 3 procentna poena. Ritam je u poglavlju 10.2 i u master planu.
 5. Okidači iz poglavlja 10.4.
 6. Blokada je alarm plus zapis, bez egzekucije. SL alarm se ponavlja na 60s.
-7. Komande iz 10.1. Limiti samo na sajtu.
+7. Komande iz 10.1. Nema `/mode`. Limiti samo na sajtu. Mod se računa po trejdu.
 8. Dnevni izveštaj u 22:00 lokalno. Nula trejdova i dalje šalje poruku, score 100.
 9. Tihi sati gase tiha osvežavanja. Crveni alarmi prolaze.
 10. SL/TP se čitaju sa berze. Bez SL, upozorenje posle 2 minuta i unos u chatu.
@@ -870,8 +869,8 @@ Sva 34 pitanja su zatvorena 2026-09-23. Skraćeni zapis da se ne otvaraju ponovo
 19. 401 gasi taj ključ i šalje jednu poruku. Manual i dalje radi.
 20. Hard delete ključa, istorija trejdova ostaje.
 21. Drizzle. Neon MCP je za agenta, ne za runtime.
-22. Next na Vercelu, Express na Railway ili Fly.
-23. Javni WS plus privatni WS ili REST na 2s. Cilj detekcije ≤ 2s.
+22. Next na Vercelu, Express na Railway ili Fly. Dok Expressa nema, zone idu cronom na 1 minut.
+23. Cilj ostaje javni WS plus privatni tok, detekcija ≤ 2s. Trenutni cron to ne postiže i ne dekriptuje ključeve.
 24. Telegram je identitet. Login Widget ili magic link.
 25. UUID primarni ključevi. `telegram_id` UNIQUE.
 26. Od 2026-10-31: Stripe Billing, 49 USD mesečno, Elements na `/checkout`. Sirovi broj kartice ne ulazi u naš DOM (SAQ A). Kripto je V2.
@@ -918,5 +917,7 @@ Konvencije koje baza sada sprovodi:
 - `is_active` default `false`. Brojači i procenti default `0`. `discipline_score` je 0–100.
 
 Billing od 2026-10-31 prati `0006_subscriptions.sql`: `users.stripe_customer_id`, prošireni `subscription_status`, tabele `subscriptions` i `stripe_events`. Sesija checkouta je httpOnly cookie `tradelyt_uid` (HMAC, `SESSION_SECRET`), postavlja se kad se nalog sačuva.
+
+Poruke zona od 2026-11-14 prate `0013_telegram_templates.sql` i `0014_trade_zones.sql`, primenjene na Neon istog dana: `users.language`, `telegram_message_templates`, kolone trejda za mod i zonu, tihi sati i pauza na `bot_settings`. Tekstovi 39 poruka još nisu uneti. Seed je prazan dok se ne zaključaju.
 
 Poglavlja 7–9 i dalje opisuju širi proizvodni cilj koji nije sav u bazi (posebna `exchange_keys` tabela, modovi `scalper` / `classic` / `moonshot`, odvojeni IV i auth tag). Kod koji dira bazu prati ovo poglavlje i migracije `0001` do `0006`. `trialing` i `expired` jesu u živoj CHECK listi od `0006`.

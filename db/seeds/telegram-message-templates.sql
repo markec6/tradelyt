@@ -1,0 +1,6 @@
+-- Seed for telegram_message_templates.
+-- The wording source is TELEGRAM_MESSAGES_MASTER_PLAN.md, chapter 14.
+-- Locked texts: 0 of 39. This file has no INSERT until a text is locked.
+-- A locked row is inserted for both languages, is_active = true, version = 1.
+-- A later change inserts version + 1 and sets the previous row is_active = false.
+-- Do not edit a locked body in place.

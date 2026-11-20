@@ -4,7 +4,9 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 
 import { ProfileMenu } from "@/components/account/profile-menu"
+import { ManualTradePanel } from "@/components/dashboard/manual-trade-panel"
 import { ui } from "@/components/checkout/copy"
+import { listOpenTrades } from "@/lib/manual-trade"
 import { loadSessionProfile } from "@/lib/profile"
 import { readUserIdFromCookies } from "@/lib/session-store"
 import { getDashboardAccess } from "@/lib/subscriptions"
@@ -32,6 +34,7 @@ export default async function DashboardPage() {
   const access = await getDashboardAccess(userId)
   if (!access) redirect("/checkout")
   const profile = await loadSessionProfile()
+  const trades = await listOpenTrades(userId)
 
   const trialing = access.status === "trialing"
   const banner = trialing
@@ -56,8 +59,8 @@ export default async function DashboardPage() {
       <div className="pointer-events-none fixed top-0 left-1/3 h-[600px] w-[600px] rounded-full bg-emerald-500/10 blur-[120px]" />
       <div className="pointer-events-none fixed top-1/2 right-0 h-[400px] w-[400px] rounded-full bg-cyan-500/10 blur-[100px]" />
 
-      <div className="relative flex min-h-dvh flex-col px-3 py-4 sm:px-4">
-        <header className="flex items-center justify-end">
+      <div className="relative flex min-h-dvh flex-col items-center px-3 py-4 sm:px-4">
+        <header className="flex w-full items-center justify-end">
           {profile ? <ProfileMenu profile={profile} /> : null}
         </header>
         <section className="m-auto w-full max-w-lg rounded-3xl border border-emerald-400/35 bg-slate-900/80 p-5 shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_20px_60px_rgba(0,0,0,0.45),0_0_40px_rgba(16,185,129,0.12)] backdrop-blur-xl sm:p-8">
@@ -90,6 +93,7 @@ export default async function DashboardPage() {
             Back to site
           </Link>
         </section>
+        <ManualTradePanel trades={trades} />
       </div>
     </main>
   )

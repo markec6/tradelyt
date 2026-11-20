@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless"
 
 import { telegramHandleError } from "@/components/onboarding/validate-telegram"
 import { consumeLinkToken, hashLinkToken } from "@/lib/link-tokens"
+import { handleTradeCallback, handleTradeCommand } from "@/lib/telegram-actions"
 import {
   TELEGRAM_AVATAR_PATH,
   getUserProfilePhotos,
@@ -126,6 +127,10 @@ async function rememberBlock(chatId: string, blocked: boolean) {
 }
 
 async function handleUpdate(update: TelegramUpdate) {
+  if (update.callback) {
+    await handleTradeCallback(update.callback)
+    return
+  }
   const member = update.myChatMember
   if (member) {
     if (member.status === "kicked") await rememberBlock(member.chatId, true)
@@ -148,6 +153,7 @@ async function handleUpdate(update: TelegramUpdate) {
     payloadLength: start.command && start.payload ? start.payload.length : 0,
   })
   if (!start.command) {
+    if (await handleTradeCommand(message)) return
     await reply(message, READ_ONLY)
     return
   }
